@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "pnpm vercel-build",
+  "crons": [{ "path": "/api/cron/housekeeping", "schedule": "17 3 * * *" }],
+  "functions": {
+    "src/app/api/jobs/process/route.ts": { "maxDuration": 60 },
+    "src/app/api/cron/housekeeping/route.ts": { "maxDuration": 60 }
+  }
+}
