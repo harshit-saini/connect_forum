@@ -3,6 +3,7 @@ import { loadReview } from "@/server/connections/service";
 import { rateLimit } from "@/server/ratelimit";
 import { clientKey } from "@/server/ratelimit/ip";
 import { csrfFor } from "@/server/tokens";
+import { GuideSafety } from "./guide-safety";
 import { ReviewForm } from "./review-form";
 
 export const metadata = { title: "Review a request", robots: { index: false, follow: false } };
@@ -63,6 +64,9 @@ export default async function ReviewPage({ params }: { params: Promise<{ token: 
         </dl>
       </Card>
       <ReviewForm token={token} csrf={csrfFor(review.tokenHash)} />
+      <div className="border-t border-border pt-4">
+        <GuideSafety token={token} csrf={csrfFor(review.tokenHash)} alias={review.seekerAlias} />
+      </div>
     </div>
   );
 }

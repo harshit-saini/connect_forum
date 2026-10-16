@@ -16,6 +16,8 @@ async function sql<T = Record<string, unknown>>(text: string, params: unknown[] 
 }
 
 test.beforeAll(async () => {
+  await sql("delete from blocks where blocker_id = (select id from users where email = $1) or blocked_id = (select id from users where email = $1)", [SEEKER]);
+  await sql("delete from reports where reporter_id = (select id from users where email = $1)", [SEEKER]);
   await sql("delete from connection_requests where seeker_id = (select id from users where email = $1)", [SEEKER]);
   await sql("delete from match_runs where seeker_id = (select id from users where email = $1)", [SEEKER]);
 });
@@ -77,4 +79,27 @@ test("request, review link, approve, and the seeker sees it approved", async ({ 
   const mails = await sql<{ text: string }>("select text from dev_outbox where \"to\" = $1 and subject = 'Your request was approved' and created_at > $2", [SEEKER, startedAt]);
   expect(mails.length).toBeGreaterThan(0);
   expect(mails[0]!.text.replace(/https?:\/\/\S+/g, "")).not.toMatch(/\+?\d[\d\s-]{8,}\d/);
+
+  // Reveal: the number is not in the page until "Show number" is pressed, and the response is never cacheable.
+  await page.getByRole("link", { name: "Open" }).click();
+  await expect(page.getByRole("heading", { name: alias })).toBeVisible();
+  expect(await page.content()).not.toMatch(/\+9190000000\d\d/);
+  const reveal = page.waitForResponse((r) => r.url().includes("/reveal"));
+  await page.getByRole("button", { name: "Show number" }).click();
+  const res = await reveal;
+  expect(res.headers()["cache-control"]).toMatch(/no-store/);
+  await expect(page.getByTestId("revealed-number")).toHaveText(/^\+9190000000\d\d$/);
+  await expect(page.getByText(/Best time: Weekday evenings/)).toBeVisible();
+  await page.getByRole("button", { name: "Hide" }).click();
+  await expect(page.getByTestId("revealed-number")).toHaveCount(0);
+
+  // Blocking the Guide ends access to the number.
+  await page.getByRole("button", { name: "Report or block" }).click();
+  const dialog2 = page.getByRole("dialog");
+  await dialog2.getByLabel("Block", { exact: false }).first().check();
+  await dialog2.getByRole("button", { name: "Block", exact: true }).click();
+  await expect(dialog2.getByRole("heading", { name: "Blocked" })).toBeVisible();
+  await dialog2.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Show number" }).click();
+  await expect(page.getByText("This Guide's number is no longer available.")).toBeVisible();
 });

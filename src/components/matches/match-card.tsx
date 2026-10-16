@@ -1,4 +1,5 @@
 import { Card } from "@/components/ui/card";
+import { SeekerSafety } from "@/components/safety/seeker-safety";
 import type { MatchCard as Match } from "@/server/matching/view";
 
 function Chips({ items, label }: { items: string[]; label: string }) {
@@ -55,6 +56,7 @@ export function MatchCardView({ match, action }: { match: Match; action?: React.
         {status && <span className="rounded-full border border-border px-3 py-1 text-xs font-medium">{status}</span>}
         {!status && action}
       </div>
+      <div className="border-t border-border pt-2"><SeekerSafety target={{ kind: "match", id: match.matchId }} who={match.alias} /></div>
     </Card>
   );
 }

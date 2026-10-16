@@ -8,6 +8,8 @@ test.beforeAll(async () => {
   // Needs seeded data (pnpm seed). Reset this seeker's runs so cooldown and caching don't interfere.
   const client = new pg.Client({ connectionString: process.env.DATABASE_URL ?? "postgres://cf:cf@localhost:5432/connect_forum" });
   await client.connect();
+  await client.query("delete from blocks where blocker_id = (select id from users where email = $1) or blocked_id = (select id from users where email = $1)", [SEEKER]);
+  await client.query("delete from reports where reporter_id = (select id from users where email = $1)", [SEEKER]);
   await client.query("delete from connection_requests where seeker_id = (select id from users where email = $1)", [SEEKER]);
   await client.query("delete from match_runs where seeker_id = (select id from users where email = $1)", [SEEKER]);
   await client.end();
