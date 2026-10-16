@@ -18,7 +18,16 @@ export async function latestCode(email: string): Promise<string> {
   throw new Error(`No sign-in email for ${email}`);
 }
 
+/** Test-only: the per-IP auth rate limit would otherwise trip when many tests sign in from one address. */
+async function resetAuthRateLimits() {
+  const client = new pg.Client({ connectionString: process.env.DATABASE_URL ?? "postgres://cf:cf@localhost:5432/connect_forum" });
+  await client.connect();
+  await client.query("delete from auth_rate_limits");
+  await client.end();
+}
+
 export async function signIn(page: Page, email: string) {
+  await resetAuthRateLimits();
   await page.goto("/sign-in");
   await page.getByLabel("Email address").fill(email);
   await page.getByRole("button", { name: "Email me a code" }).click();

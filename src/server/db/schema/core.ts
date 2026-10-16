@@ -16,24 +16,6 @@ export const userRoles = pgTable(
   (t) => [primaryKey({ columns: [t.userId, t.role] })],
 );
 
-const profileBase = () => ({
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id")
-    .notNull()
-    .unique()
-    .references(() => users.id, { onDelete: "cascade" }),
-  /** Bumped on every matching-relevant change. */
-  profileVersion: integer("profile_version").notNull().default(0),
-  profileCompletedAt: timestamp("profile_completed_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
-});
-
-// Milestone 2 skeletons; the full career-profile columns arrive in milestone 3.
-export const seekerProfiles = pgTable("seeker_profiles", profileBase());
-export const guideProfiles = pgTable("guide_profiles", profileBase());
-
 /** Development-only mailbox, written when MOCK_AI=true instead of calling Resend. */
 export const devOutbox = pgTable(
   "dev_outbox",

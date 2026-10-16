@@ -61,8 +61,8 @@ function create() {
       window: 60,
       max: 60,
       customRules: {
-        "/email-otp/send-verification-otp": { window: 600, max: 5 },
-        "/sign-in/email-otp": { window: 600, max: 10 },
+        "/email-otp/send-verification-otp": { window: 600, max: 10 },
+        "/sign-in/email-otp": { window: 600, max: 20 },
       },
     },
     plugins: [
