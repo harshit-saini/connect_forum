@@ -57,16 +57,11 @@ export const embedProfile: Handler = async (job) => {
   log.info("embedding.stored", { userId, kind, model: provider.model });
 };
 
-const notYet = (type: string): Handler => async () => {
-  throw new Error(`Job handler for ${type} is not implemented yet`);
-};
-
-/** rating_reminder arrives in milestone 9. */
 export const handlers: Record<JobType, Handler> = {
   embed_profile: embedProfile,
   match_run: async (job) => executeRun(String(job.payload.runId)),
   send_email: async (job) => sendEmailJob(job.payload as Parameters<typeof sendEmailJob>[0], job.id),
-  rating_reminder: notYet("rating_reminder"),
+  rating_reminder: async (job) => sendEmailJob({ ...(job.payload as { userId: string }), kind: "rating_reminder" }, job.id),
 };
 
 /** Called once a job has used all its attempts, so user-visible state does not stay "in progress". */

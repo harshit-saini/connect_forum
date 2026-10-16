@@ -17,6 +17,7 @@ async function sql<T = Record<string, unknown>>(text: string, params: unknown[] 
 
 test.beforeAll(async () => {
   await sql("delete from blocks where blocker_id = (select id from users where email = $1) or blocked_id = (select id from users where email = $1)", [SEEKER]);
+  await sql("delete from ratings where seeker_id = (select id from users where email = $1)", [SEEKER]);
   await sql("delete from reports where reporter_id = (select id from users where email = $1)", [SEEKER]);
   await sql("delete from connection_requests where seeker_id = (select id from users where email = $1)", [SEEKER]);
   await sql("delete from match_runs where seeker_id = (select id from users where email = $1)", [SEEKER]);
@@ -82,7 +83,7 @@ test("request, review link, approve, and the seeker sees it approved", async ({ 
 
   // Reveal: the number is not in the page until "Show number" is pressed, and the response is never cacheable.
   await page.getByRole("link", { name: "Open" }).click();
-  await expect(page.getByRole("heading", { name: alias })).toBeVisible();
+  await expect(page.getByRole("heading", { name: alias, exact: true })).toBeVisible();
   expect(await page.content()).not.toMatch(/\+9190000000\d\d/);
   const reveal = page.waitForResponse((r) => r.url().includes("/reveal"));
   await page.getByRole("button", { name: "Show number" }).click();
@@ -92,6 +93,20 @@ test("request, review link, approve, and the seeker sees it approved", async ({ 
   await expect(page.getByText(/Best time: Weekday evenings/)).toBeVisible();
   await page.getByRole("button", { name: "Hide" }).click();
   await expect(page.getByTestId("revealed-number")).toHaveCount(0);
+
+  // Rating: submit, then edit within the window. The Guide never sees this.
+  await page.getByRole("link", { name: "Rate this Guide" }).click();
+  await expect(page.getByRole("heading", { name: new RegExp(`How was ${alias}`) })).toBeVisible();
+  await page.getByLabel(/5 stars/).check({ force: true });
+  await page.getByLabel(/Review/).fill("Clear, practical advice on switching into product.");
+  await page.getByRole("button", { name: "Submit rating" }).click();
+  await expect(page.getByText("Thank you. Your rating helps other Seekers.")).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Update rating" })).toBeVisible();
+  await page.getByLabel(/4 stars/).check({ force: true });
+  await page.getByRole("button", { name: "Update rating" }).click();
+  await expect(page.getByText("Your rating was updated.")).toBeVisible();
+  await page.getByRole("link", { name: "Back to the connection" }).click();
 
   // Blocking the Guide ends access to the number.
   await page.getByRole("button", { name: "Report or block" }).click();

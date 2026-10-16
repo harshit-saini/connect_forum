@@ -44,6 +44,16 @@ export default async function ConnectionPage({ params }: { params: Promise<{ id:
         </Card>
       )}
 
+      {row.req.status === "approved" && (
+        <Card className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-semibold">Spoke with {row.alias}?</h2>
+            <p className="text-sm text-muted">Rate your experience. It helps other Seekers.</p>
+          </div>
+          <Link href={`/seeker/rate/${row.req.id}`} className="inline-flex min-h-11 items-center rounded-lg border border-border bg-card px-4 text-sm font-medium hover:bg-accent">Rate this Guide</Link>
+        </Card>
+      )}
+
       <Card className="space-y-2 text-sm">
         <h2 className="font-semibold">About this Guide</h2>
         <p className="whitespace-pre-line">{guide.summary}</p>

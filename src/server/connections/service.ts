@@ -136,6 +136,8 @@ export async function decide(token: string, decision: "approve" | "decline"): Pr
     if (unlock) await audit(tx, { action: "unlock.created", actorId: r.guideId, targetId: r.seekerId, subjectType: "unlock", subjectId: unlock.id });
     await bumpCounter(tx, GUIDE_POOL_VERSION); // the Guide's remaining capacity changed
     await queue().enqueue(tx, "send_email", { kind: "request_approved", userId: r.seekerId, requestId: r.id }, { idempotencyKey: `req_approved:${r.id}` });
+    // "How was your Guide?" goes out RATING_DELAY_DAYS later (any worker run or the daily sweep sends it).
+    await queue().enqueue(tx, "rating_reminder", { userId: r.seekerId, requestId: r.id }, { runAt: new Date(now.getTime() + env().RATING_DELAY_DAYS * 86_400_000), idempotencyKey: `rating_reminder:${r.id}` });
     return { ok: true, outcome: "approved" } as const;
   });
 }

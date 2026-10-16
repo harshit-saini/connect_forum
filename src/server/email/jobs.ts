@@ -1,10 +1,11 @@
 import "server-only";
 import { asc, eq, sql } from "drizzle-orm";
 import { db } from "@/server/db/client";
-import { connectionRequests, jobs, matches, seekerProfiles, userAliases, users } from "@/server/db/schema";
+import { connectionRequests, jobs, matches, ratings, seekerProfiles, userAliases, users } from "@/server/db/schema";
 import { env } from "@/server/env";
 import { sendEmail } from "./index";
 import { MatchesReadyEmail } from "./templates/matches-ready";
+import { RatingReminderEmail } from "./templates/rating-reminder";
 import { ConnectionRequestEmail, RequestApprovedEmail, RequestDeclinedEmail, RequestExpiredEmail } from "./templates/connection";
 import { publicSeeker } from "@/server/matching/public";
 import { REQUEST_TTL_DAYS } from "@/server/connections/service";
@@ -69,6 +70,14 @@ export async function sendEmailJob(payload: Payload, jobId?: string): Promise<vo
       const [r] = await db().select({ id: connectionRequests.id, status: connectionRequests.status, alias: userAliases.alias }).from(connectionRequests).innerJoin(userAliases, eq(userAliases.userId, connectionRequests.guideId)).where(eq(connectionRequests.id, String(payload.requestId)));
       if (!r || r.status !== "approved") return;
       await sendEmail({ to: user.email, subject: "Your request was approved", kind: "request-approved", react: RequestApprovedEmail({ guideAlias: r.alias, link: `${env().APP_URL}/seeker/connections/${r.id}` }) });
+      return;
+    }
+    case "rating_reminder": {
+      const [r] = await db().select({ id: connectionRequests.id, status: connectionRequests.status, alias: userAliases.alias }).from(connectionRequests).innerJoin(userAliases, eq(userAliases.userId, connectionRequests.guideId)).where(eq(connectionRequests.id, String(payload.requestId)));
+      if (!r || r.status !== "approved") return;
+      const [done] = await db().select({ id: ratings.id }).from(ratings).where(eq(ratings.connectionRequestId, r.id)).limit(1);
+      if (done) return; // already rated: no nag
+      await sendEmail({ to: user.email, subject: "How was your Guide?", kind: "rating-reminder", react: RatingReminderEmail({ guideAlias: r.alias, link: `${env().APP_URL}/seeker/rate/${r.id}` }) });
       return;
     }
     case "request_declined":
