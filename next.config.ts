@@ -7,6 +7,14 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        // The worker script itself must never be cached, or fixes would not reach installed apps.
+        source: "/sw.js",
+        headers: [
+          { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+          { key: "Service-Worker-Allowed", value: "/" },
+        ],
+      },
+      {
         // Review links carry a secret in the URL: keep it out of referrers, caches and search engines.
         source: "/review/:token*",
         headers: [
