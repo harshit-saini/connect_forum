@@ -5,7 +5,19 @@ const nextConfig: NextConfig = {
   // Lets e2e run `next dev` without clobbering a production build in .next.
   distDir: process.env.NEXT_DIST_DIR || ".next",
   async headers() {
+    const isProd = process.env.NODE_ENV === "production";
     return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=(), interest-cohort=()" },
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+          ...(isProd ? [{ key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" }] : []),
+        ],
+      },
       {
         // The worker script itself must never be cached, or fixes would not reach installed apps.
         source: "/sw.js",

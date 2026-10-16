@@ -16,6 +16,7 @@ export type AuditAction =
   | "user.deleted"
   | "data.exported"
   | "report.created"
+  | "report.reviewed"
   | "block.created";
 
 export type AuditEntry = {

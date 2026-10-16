@@ -61,7 +61,11 @@ const schema = z
         ctx.addIssue({ code: "custom", path: ["VAULT_PREVIOUS_KEYS"], message: "expected 'version:base64key' pairs with 32-byte keys and versions different from VAULT_KEY_VERSION" });
       }
     }
-    // MOCK_AI also switches Resend to a console/db mock, so real keys are only needed without it.
+    // MOCK_AI also switches Resend to a database mailbox, so on a real Vercel production deploy it would
+    // silently stop all e-mail. Refuse that combination outright.
+    if (env.MOCK_AI && process.env.VERCEL_ENV === "production") {
+      ctx.addIssue({ code: "custom", path: ["MOCK_AI"], message: "must be false on a production deployment" });
+    }
     if (env.MOCK_AI) return;
     if (env.NODE_ENV === "production" && env.APP_URL.startsWith("http://")) {
       ctx.addIssue({ code: "custom", path: ["APP_URL"], message: "must be https in production" });

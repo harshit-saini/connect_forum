@@ -1,3 +1,4 @@
+import { forbidden, sameOrigin } from "@/server/http";
 import { z } from "zod";
 import { rateLimit, tooManyRequests } from "@/server/ratelimit";
 import { applySafetyAction, resolveSeekerTarget, safetyInput } from "@/server/safety/service";
@@ -9,6 +10,7 @@ const noStore = { "Cache-Control": "no-store" };
 const body = safetyInput.extend({ target: z.object({ kind: z.enum(["match", "connection"]), id: z.uuid() }) });
 
 export async function POST(req: Request) {
+  if (!sameOrigin(req)) return forbidden();
   const viewer = await getViewer();
   if (!viewer || viewer.suspended || viewer.role !== "seeker") return Response.json({ error: "Not signed in" }, { status: 401, headers: noStore });
 

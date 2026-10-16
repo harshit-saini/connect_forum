@@ -1,0 +1,148 @@
+import "server-only";
+import { aliasedTable, and, count, desc, eq, ilike, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
+import { audit } from "@/server/audit";
+import { db } from "@/server/db/client";
+import { auditLog, guideProfiles, ratings, reports, seekerProfiles, sessions, userAliases, userRoles, users } from "@/server/db/schema";
+import { bumpCounter, GUIDE_POOL_VERSION } from "@/server/profile/counters";
+
+export const PAGE_SIZE = 25;
+
+const page = (n: number) => ({ limit: PAGE_SIZE, offset: Math.max(0, n - 1) * PAGE_SIZE });
+
+export async function overview() {
+  const [[u], [g], [s], [r], [sus]] = await Promise.all([
+    db().select({ n: count() }).from(users).where(isNull(users.deletedAt)),
+    db().select({ n: count() }).from(guideProfiles).where(isNotNull(guideProfiles.profileCompletedAt)),
+    db().select({ n: count() }).from(seekerProfiles).where(isNotNull(seekerProfiles.profileCompletedAt)),
+    db().select({ n: count() }).from(reports).where(eq(reports.status, "open")),
+    db().select({ n: count() }).from(users).where(isNotNull(users.suspendedAt)),
+  ]);
+  return { users: u!.n, guides: g!.n, seekers: s!.n, openReports: r!.n, suspended: sus!.n };
+}
+
+export type AdminUserRow = { id: string; email: string; alias: string | null; role: string | null; suspendedAt: Date | null; createdAt: Date; profileCompleted: boolean };
+
+export async function listUsers(args: { q?: string; status?: "all" | "suspended"; page: number }): Promise<{ rows: AdminUserRow[]; total: number }> {
+  const filters: SQL[] = [isNull(users.deletedAt)];
+  if (args.q) filters.push(or(ilike(users.email, `%${args.q}%`), ilike(userAliases.alias, `%${args.q}%`))!);
+  if (args.status === "suspended") filters.push(isNotNull(users.suspendedAt));
+  const where = and(...filters);
+
+  const base = db().select({ id: users.id }).from(users).leftJoin(userAliases, eq(userAliases.userId, users.id)).where(where);
+  const [{ n }] = (await db().select({ n: count() }).from(base.as("t"))) as [{ n: number }];
+  const rows = await db()
+    .select({
+      id: users.id, email: users.email, alias: userAliases.alias, role: userRoles.role, suspendedAt: users.suspendedAt, createdAt: users.createdAt,
+      seekerDone: seekerProfiles.profileCompletedAt, guideDone: guideProfiles.profileCompletedAt,
+    })
+    .from(users)
+    .leftJoin(userAliases, eq(userAliases.userId, users.id))
+    .leftJoin(userRoles, eq(userRoles.userId, users.id))
+    .leftJoin(seekerProfiles, eq(seekerProfiles.userId, users.id))
+    .leftJoin(guideProfiles, eq(guideProfiles.userId, users.id))
+    .where(where)
+    .orderBy(desc(users.createdAt))
+    .limit(page(args.page).limit)
+    .offset(page(args.page).offset);
+  return { total: n, rows: rows.map((r) => ({ id: r.id, email: r.email, alias: r.alias, role: r.role, suspendedAt: r.suspendedAt, createdAt: r.createdAt, profileCompleted: Boolean(r.seekerDone || r.guideDone) })) };
+}
+
+export type AdminResult = { ok: true } | { ok: false; message: string };
+
+/**
+ * Suspends a user: excluded from matching, their number can no longer be revealed, requests to and from
+ * them stop, and every session is revoked so they are signed out immediately.
+ */
+export async function suspendUser(args: { adminId: string; userId: string; reason?: string }): Promise<AdminResult> {
+  const { adminId, userId } = args;
+  if (adminId === userId) return { ok: false, message: "You can't suspend yourself." };
+  const [target] = await db().select().from(users).where(eq(users.id, userId));
+  if (!target || target.deletedAt) return { ok: false, message: "User not found." };
+  if (target.suspendedAt) return { ok: true };
+
+  await db().transaction(async (tx) => {
+    await tx.update(users).set({ suspendedAt: new Date(), updatedAt: new Date() }).where(eq(users.id, userId));
+    await tx.delete(sessions).where(eq(sessions.userId, userId));
+    await bumpCounter(tx, GUIDE_POOL_VERSION); // cached match results may include this Guide
+    await audit(tx, { action: "user.suspended", actorId: adminId, targetId: userId, subjectType: "user", subjectId: userId, metadata: { reason: args.reason?.slice(0, 200) } });
+  });
+  return { ok: true };
+}
+
+export async function unsuspendUser(args: { adminId: string; userId: string }): Promise<AdminResult> {
+  const [target] = await db().select().from(users).where(eq(users.id, args.userId));
+  if (!target || target.deletedAt) return { ok: false, message: "User not found." };
+  if (!target.suspendedAt) return { ok: true };
+  await db().transaction(async (tx) => {
+    await tx.update(users).set({ suspendedAt: null, updatedAt: new Date() }).where(eq(users.id, args.userId));
+    await bumpCounter(tx, GUIDE_POOL_VERSION);
+    await audit(tx, { action: "user.unsuspended", actorId: args.adminId, targetId: args.userId, subjectType: "user", subjectId: args.userId });
+  });
+  return { ok: true };
+}
+
+export type ReportRow = { id: string; reason: string; details: string | null; status: string; createdAt: Date; reporterAlias: string | null; reportedAlias: string | null; reportedId: string; reportedSuspended: boolean };
+
+export async function listReports(status: "open" | "all", pageNo: number): Promise<{ rows: ReportRow[]; total: number }> {
+  const reporterAlias = aliasedTable(userAliases, "reporter_alias");
+  const reportedAlias = aliasedTable(userAliases, "reported_alias");
+  const where = status === "open" ? eq(reports.status, "open") : undefined;
+  const [{ n }] = (await db().select({ n: count() }).from(reports).where(where)) as [{ n: number }];
+  const rows = await db()
+    .select({ id: reports.id, reason: reports.reason, details: reports.details, status: reports.status, createdAt: reports.createdAt, reporterAlias: reporterAlias.alias, reportedAlias: reportedAlias.alias, reportedId: reports.reportedId, suspendedAt: users.suspendedAt })
+    .from(reports)
+    .leftJoin(reporterAlias, eq(reporterAlias.userId, reports.reporterId))
+    .leftJoin(reportedAlias, eq(reportedAlias.userId, reports.reportedId))
+    .innerJoin(users, eq(users.id, reports.reportedId))
+    .where(where)
+    .orderBy(desc(reports.createdAt))
+    .limit(page(pageNo).limit)
+    .offset(page(pageNo).offset);
+  return { total: n, rows: rows.map(({ suspendedAt, ...r }) => ({ ...r, reportedSuspended: Boolean(suspendedAt) })) };
+}
+
+export async function reviewReport(adminId: string, reportId: string, outcome: "reviewed" | "dismissed"): Promise<AdminResult> {
+  const updated = await db().update(reports).set({ status: outcome, reviewedAt: new Date() }).where(eq(reports.id, reportId)).returning({ id: reports.id, reportedId: reports.reportedId });
+  if (!updated[0]) return { ok: false, message: "Report not found." };
+  await audit(db(), { action: "report.reviewed", actorId: adminId, targetId: updated[0].reportedId, subjectType: "report", subjectId: reportId, metadata: { outcome } });
+  return { ok: true };
+}
+
+export type AdminRatingRow = { id: string; score: number; review: string | null; createdAt: Date; guideAlias: string | null; seekerAlias: string | null };
+
+/** Individual ratings and reviews: visible to admins only (Guides see aggregates; the matcher sees scores). */
+export async function listRatings(pageNo: number): Promise<{ rows: AdminRatingRow[]; total: number }> {
+  const guideAlias = aliasedTable(userAliases, "g_alias");
+  const seekerAlias = aliasedTable(userAliases, "s_alias");
+  const [{ n }] = (await db().select({ n: count() }).from(ratings)) as [{ n: number }];
+  const rows = await db()
+    .select({ id: ratings.id, score: ratings.score, review: ratings.review, createdAt: ratings.createdAt, guideAlias: guideAlias.alias, seekerAlias: seekerAlias.alias })
+    .from(ratings)
+    .leftJoin(guideAlias, eq(guideAlias.userId, ratings.guideId))
+    .leftJoin(seekerAlias, eq(seekerAlias.userId, ratings.seekerId))
+    .orderBy(desc(ratings.createdAt))
+    .limit(page(pageNo).limit)
+    .offset(page(pageNo).offset);
+  return { total: n, rows };
+}
+
+export type AuditRow = { id: string; at: Date; action: string; actorAlias: string | null; targetAlias: string | null; subjectType: string | null; metadata: Record<string, unknown> };
+
+export async function listAudit(args: { action?: string; page: number }): Promise<{ rows: AuditRow[]; total: number; actions: string[] }> {
+  const actorAlias = aliasedTable(userAliases, "a_alias");
+  const targetAlias = aliasedTable(userAliases, "t_alias");
+  const where = args.action ? eq(auditLog.action, args.action) : undefined;
+  const [{ n }] = (await db().select({ n: count() }).from(auditLog).where(where)) as [{ n: number }];
+  const rows = await db()
+    .select({ id: auditLog.id, at: auditLog.at, action: auditLog.action, actorAlias: actorAlias.alias, targetAlias: targetAlias.alias, subjectType: auditLog.subjectType, metadata: auditLog.metadata })
+    .from(auditLog)
+    .leftJoin(actorAlias, eq(actorAlias.userId, auditLog.actorId))
+    .leftJoin(targetAlias, eq(targetAlias.userId, auditLog.targetId))
+    .where(where)
+    .orderBy(desc(auditLog.at))
+    .limit(page(args.page).limit)
+    .offset(page(args.page).offset);
+  const distinct = await db().execute(sql`select distinct action from audit_log order by action`);
+  return { total: n, rows, actions: (distinct as unknown as { rows: { action: string }[] }).rows.map((r) => r.action) };
+}
+

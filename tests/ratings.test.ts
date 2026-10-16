@@ -163,6 +163,12 @@ describe("housekeeping", () => {
     const [rem] = await db().select().from(jobs).where(eq(jobs.idempotencyKey, `rating_reminder:${p.requestId}`));
     await db().update(jobs).set({ runAt: new Date(Date.now() - 1000) }).where(eq(jobs.id, rem!.id));
 
+    // an overdue request
+    await approvedPair();
+    const g3 = await makeGuide();
+    const s3 = await makeSeeker();
+    await db().insert(connectionRequests).values({ seekerId: s3.user.id, guideId: g3.user.id, status: "pending", tokenHash: randomUUID(), expiresAt: new Date(Date.now() - 1000) });
+
     // a stalled job
     const { id: stalledId } = await queue().enqueue(db(), "send_email", { kind: "unknown_but_harmless", userId: p.seeker.user.id });
     await db().execute(sql`update jobs set status = 'running', heartbeat_at = now() - interval '10 minutes', attempts = 1 where id = ${stalledId}`);
@@ -171,12 +177,6 @@ describe("housekeeping", () => {
     const [run] = await db().insert(matchRuns).values({ seekerId: s2.user.id, inputHash: "h", status: "ranking" }).returning();
     await queue().enqueue(db(), "match_run", { runId: run!.id }, { maxAttempts: 1 });
     await db().execute(sql`update jobs set status = 'dead' where type = 'match_run' and payload->>'runId' = ${run!.id}`);
-    // an overdue request
-    await approvedPair();
-    const g3 = await makeGuide();
-    const s3 = await makeSeeker();
-    await db().insert(connectionRequests).values({ seekerId: s3.user.id, guideId: g3.user.id, status: "pending", tokenHash: randomUUID(), expiresAt: new Date(Date.now() - 1000) });
-
     const first = await runHousekeeping();
     expect(first.requeued).toBeGreaterThanOrEqual(1);
     expect(first.failedRuns).toBeGreaterThanOrEqual(1);

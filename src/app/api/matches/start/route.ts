@@ -1,3 +1,4 @@
+import { forbidden, sameOrigin } from "@/server/http";
 import { rateLimit, tooManyRequests } from "@/server/ratelimit";
 import { kickWorker } from "@/server/jobs/kick";
 import { startRun } from "@/server/matching/pipeline";
@@ -7,7 +8,8 @@ export const dynamic = "force-dynamic";
 
 const noStore = { "Cache-Control": "no-store" };
 
-export async function POST() {
+export async function POST(req: Request) {
+  if (!sameOrigin(req)) return forbidden();
   const viewer = await getViewer();
   if (!viewer || viewer.suspended) return Response.json({ error: "Not signed in" }, { status: 401, headers: noStore });
   if (viewer.role !== "seeker" || !viewer.profileCompleted) {

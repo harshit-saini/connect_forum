@@ -1,3 +1,4 @@
+import { forbidden, sameOrigin } from "@/server/http";
 import { z } from "zod";
 import { createRequest } from "@/server/connections/service";
 import { kickWorker } from "@/server/jobs/kick";
@@ -10,6 +11,7 @@ const noStore = { "Cache-Control": "no-store" };
 const body = z.object({ matchId: z.uuid(), note: z.string().max(1000).optional() });
 
 export async function POST(req: Request) {
+  if (!sameOrigin(req)) return forbidden();
   const viewer = await getViewer();
   if (!viewer || viewer.suspended) return Response.json({ error: "Not signed in" }, { status: 401, headers: noStore });
   if (viewer.role !== "seeker" || !viewer.profileCompleted) return Response.json({ error: "Only Seekers can send requests" }, { status: 403, headers: noStore });

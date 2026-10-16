@@ -2,9 +2,11 @@ import "server-only";
 import { log } from "@/server/logging/logger";
 import { handlers, onDead } from "./handlers";
 import { queue, type JobRecord } from "./index";
+import { STALE_AFTER_MS } from "./queue";
+
+export { STALE_AFTER_MS };
 
 const HEARTBEAT_MS = 30_000;
-export const STALE_AFTER_MS = 5 * 60_000;
 
 async function runOne(job: JobRecord) {
   const q = queue();

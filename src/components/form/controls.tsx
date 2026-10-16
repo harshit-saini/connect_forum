@@ -336,7 +336,7 @@ export function AvailabilityGrid({ name, label, hint }: Base) {
             const value: string[] = field.value ?? [];
             const toggle = (slot: string) => field.onChange(value.includes(slot) ? value.filter((s) => s !== slot) : [...value, slot]);
             return (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto" role="region" aria-label="Weekly availability grid" tabIndex={0}>
                 <table className="w-full min-w-[20rem] border-separate border-spacing-1 text-sm">
                   <thead>
                     <tr>

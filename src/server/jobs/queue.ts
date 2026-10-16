@@ -33,6 +33,8 @@ export interface JobQueue {
 
 const CLAIM_LOCK = 727_001;
 export const BACKOFF_BASE_SECONDS = 30;
+/** A running job with no heartbeat for this long is presumed dead (its function was killed or crashed). */
+export const STALE_AFTER_MS = 5 * 60_000;
 
 function rows<T>(res: unknown): T[] {
   return (res as { rows: T[] }).rows;
@@ -53,6 +55,10 @@ export function createPgQueue(db: Db, opts: { matchCap: number }): JobQueue {
       return db.transaction(async (tx) => {
         // Serialise claimers so the match_run cap cannot be overshot by two simultaneous claims.
         await tx.execute(sql`select pg_advisory_xact_lock(${CLAIM_LOCK})`);
+        // Self-healing: recover crashed jobs here so they cannot hold the concurrency cap until a daily sweep.
+        await tx.execute(sql`
+          update jobs set status = case when attempts >= max_attempts then 'dead' else 'queued' end, locked_at = null, last_error = 'stalled: no heartbeat'
+          where status = 'running' and heartbeat_at < now() - (${STALE_AFTER_MS} * interval '1 millisecond')`);
         const res = await tx.execute(sql`
           with picked as (
             select id from jobs

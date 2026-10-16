@@ -91,3 +91,30 @@ describe("pg job queue", () => {
     expect(await queue.claimOne()).toBeNull();
   });
 });
+
+describe("self-healing claims", () => {
+  it("recovers crashed jobs at claim time so they cannot hold the match_run cap", async () => {
+    const queue = q(2);
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) ids.push((await queue.enqueue(db(), "match_run", { i })).id!);
+    const a = (await queue.claimOne())!;
+    const b = (await queue.claimOne())!;
+    expect(await queue.claimOne()).toBeNull(); // cap of 2 is full
+
+    // Both workers die without a heartbeat.
+    await db().update(jobs).set({ heartbeatAt: sql`now() - interval '10 minutes'` }).where(sql`id in (${a.id}, ${b.id})`);
+    const next = await queue.claimOne();
+    expect(next).not.toBeNull(); // the stale jobs no longer count, and are back in the queue
+    const rows = await db().select().from(jobs);
+    expect(rows.filter((r) => r.status === "running").length).toBeLessThanOrEqual(2);
+  });
+
+  it("dead-letters a crashed job that is out of attempts", async () => {
+    const queue = q();
+    const { id } = await queue.enqueue(db(), "send_email", {}, { maxAttempts: 1 });
+    await queue.claimOne();
+    await db().update(jobs).set({ heartbeatAt: sql`now() - interval '10 minutes'` }).where(eq(jobs.id, id!));
+    expect(await queue.claimOne()).toBeNull();
+    expect((await status(id!)).status).toBe("dead");
+  });
+});

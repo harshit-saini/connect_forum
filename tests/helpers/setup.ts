@@ -7,3 +7,4 @@ process.env.CRON_SECRET = "test-cron-secret-123456";
 process.env.VAULT_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
 process.env.MOCK_AI = "true";
 process.env.ADMIN_EMAILS = "admin@example.com";
+process.env.RESEND_WEBHOOK_SECRET = "whsec_" + Buffer.from("test-webhook-secret-0123456789ab").toString("base64");

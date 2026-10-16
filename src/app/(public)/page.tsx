@@ -9,9 +9,13 @@ const steps = [
   ["Talk directly", "After approval you see the Guide's number in the portal and contact them yourself. Then rate the experience."],
 ];
 
-export default function Landing() {
+export default async function Landing({ searchParams }: { searchParams: Promise<{ deleted?: string }> }) {
+  const { deleted } = await searchParams;
   return (
     <div className="space-y-14 pt-8 sm:pt-16">
+      {deleted && (
+        <p role="status" className="rounded-lg border border-border bg-accent px-4 py-3 text-sm">Your account and data have been deleted.</p>
+      )}
       <section className="max-w-2xl space-y-5">
         <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">Career guidance from people who have been there.</h1>
         <p className="text-lg text-muted">

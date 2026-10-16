@@ -2,8 +2,22 @@ name: CI
 on:
   push:
   pull_request:
+
+env:
+  # Dummy values: CI runs entirely in mock mode (no external services, no real secrets).
+  DATABASE_URL: postgres://cf:cf@localhost:5432/connect_forum_test
+  DIRECT_DATABASE_URL: postgres://cf:cf@localhost:5432/connect_forum_test
+  TEST_DATABASE_URL: postgres://cf:cf@localhost:5432/connect_forum_test
+  APP_URL: http://localhost:3000
+  AUTH_SECRET: ci-secret-ci-secret-ci-secret-ci-secret
+  CRON_SECRET: ci-cron-secret-123456
+  VAULT_ENCRYPTION_KEY: MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=
+  MOCK_AI: "true"
+  ADMIN_EMAILS: admin@example.com
+
 jobs:
   check:
+    name: Typecheck, lint, unit and integration tests, build
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -12,8 +26,6 @@ jobs:
         ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U cf" --health-interval 5s --health-timeout 5s --health-retries 10
-    env:
-      TEST_DATABASE_URL: postgres://cf:cf@localhost:5432/connect_forum_test
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -24,10 +36,31 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
-        env:
-          DATABASE_URL: postgres://cf:cf@localhost:5432/connect_forum_test
-          APP_URL: http://localhost:3000
-          AUTH_SECRET: ci-secret-ci-secret-ci-secret-ci-secret
-          CRON_SECRET: ci-cron-secret-123456
-          VAULT_ENCRYPTION_KEY: MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=
-          MOCK_AI: "true"
+
+  e2e:
+    name: Playwright (production build, mock AI)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env: { POSTGRES_USER: cf, POSTGRES_PASSWORD: cf, POSTGRES_DB: connect_forum_test }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U cf" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm db:migrate
+      - run: pnpm seed
+      - run: pnpm test:e2e
+        env: { CI: "true" }
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: test-results/
+          retention-days: 7
