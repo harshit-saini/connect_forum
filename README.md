@@ -110,9 +110,10 @@ Validated with zod at server start (`src/server/env.ts`); a bad config fails fas
 | `FROM_EMAIL` | yes\* | Sender, e.g. `Connect <no-reply@mail.example.com>`. |
 | `RESEND_API_KEY` | live | Resend API key. |
 | `RESEND_WEBHOOK_SECRET` | live | Resend webhook signing secret (`whsec_…`). |
+| `LLM_PROVIDER` | no (`anthropic`) | `anthropic` for a Claude deployment, `openai` for an OpenAI (GPT) deployment on Foundry. |
 | `FOUNDRY_ENDPOINT` | live | Chat model resource URL, e.g. `https://<resource>.services.ai.azure.com`. |
 | `FOUNDRY_API_KEY` | live | Chat model key. |
-| `LLM_DEPLOYMENT` | live | Name of the Claude deployment (Sonnet tier; Haiku tier is the cheaper fallback). |
+| `LLM_DEPLOYMENT` | live | Name of the chat deployment: a Claude Sonnet-tier model (Haiku tier is the cheaper fallback) or, with `LLM_PROVIDER=openai`, a GPT deployment. |
 | `EMBEDDING_ENDPOINT` / `EMBEDDING_API_KEY` | live\* | Embedding model resource and key (may differ from the chat model). |
 | `EMBEDDING_DEPLOYMENT` | no | Embedding deployment name (default `text-embedding-3-small`, 1536 dimensions). |
 | `ENABLE_EMBEDDINGS` | no (true) | `false` skips vector retrieval; the top 20 by structured score are reranked instead. |
@@ -175,6 +176,8 @@ CI (`.github/workflows/ci.yml`) runs typecheck, lint, tests and build, and a sep
 Create **two deployments** in your Foundry resource:
 
 1. **Chat model**: a Claude Sonnet-tier deployment (Haiku tier is the cheaper fallback). Set `LLM_DEPLOYMENT` to the *deployment name* and `FOUNDRY_ENDPOINT` to the resource URL (`https://<resource>.services.ai.azure.com`). The app calls the Anthropic Messages API at `{FOUNDRY_ENDPOINT}/anthropic/v1/messages` with `x-api-key` and `anthropic-version: 2023-06-01`, sending the fixed instructions as a cacheable system block.
+
+   **Using an OpenAI model instead?** Deploy it in the same Foundry resource and set `LLM_PROVIDER=openai`, `LLM_DEPLOYMENT=<its deployment name>` (same `FOUNDRY_ENDPOINT` / `FOUNDRY_API_KEY`). The app then calls the OpenAI-compatible `{FOUNDRY_ENDPOINT}/openai/v1/chat/completions` with an `api-key` header and JSON mode. Nothing else changes: the prompt, validation, fallback and privacy rules are shared by both providers.
 2. **Embedding model**: `text-embedding-3-small` (1536 dimensions; the DB column is fixed at 1536). Set `EMBEDDING_ENDPOINT`, `EMBEDDING_API_KEY`, `EMBEDDING_DEPLOYMENT`. The app calls the OpenAI-compatible route `{EMBEDDING_ENDPOINT}/openai/v1/embeddings` with an `api-key` header and `{ model: <deployment>, input, dimensions: 1536 }`.
 
 > **Verify before go-live.** Microsoft's documentation host was not reachable from the environment this was built in, so the two request shapes above come from Anthropic's published Foundry guide plus the Azure OpenAI v1 conventions, and are unit-tested against a stub only. Both providers are small (`src/server/ai/llm.ts`, `src/server/ai/embeddings.ts`): if your resource expects a different path, header or API version, that is the only place to change. A quick check: set the `FOUNDRY_*` variables and run one search with `MOCK_AI=false`.

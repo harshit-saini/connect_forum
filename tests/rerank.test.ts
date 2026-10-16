@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { LlmProvider, LlmRequest } from "@/server/ai/llm";
-import { FoundryLlmProvider, MockLlmProvider } from "@/server/ai/llm";
+import { FoundryLlmProvider, FoundryOpenAILlmProvider, MockLlmProvider } from "@/server/ai/llm";
 import { buildUserPrompt, parseRerank, rerank, SYSTEM_PROMPT } from "@/server/matching/rerank";
 import type { PublicGuide, PublicSeeker } from "@/server/matching/public";
 
@@ -125,6 +125,57 @@ describe("FoundryLlmProvider", () => {
     vi.stubGlobal("fetch", f);
     await expect(make().complete({ system: "S", user: "U", maxTokens: 10 })).rejects.toThrow("(400)");
     expect(f).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("FoundryOpenAILlmProvider", () => {
+  const make = () => new FoundryOpenAILlmProvider("https://res.openai.azure.com/", "k", "my-gpt", { maxRetries: 2, timeoutMs: 5000 });
+  const ok = { choices: [{ message: { content: '{"ranked":[]}' } }], usage: { prompt_tokens: 12, completion_tokens: 7, prompt_tokens_details: { cached_tokens: 9 } } };
+
+  it("calls the OpenAI-compatible route with the deployment as model, api-key auth and JSON mode", async () => {
+    const f = vi.fn().mockResolvedValue(new Response(JSON.stringify(ok)));
+    vi.stubGlobal("fetch", f);
+    const res = await make().complete({ system: "SYS", user: "USER", maxTokens: 100 });
+    const [url, init] = f.mock.calls[0]!;
+    expect(url).toBe("https://res.openai.azure.com/openai/v1/chat/completions");
+    expect(init.headers["api-key"]).toBe("k");
+    const body = JSON.parse(init.body);
+    expect(body).toMatchObject({ model: "my-gpt", messages: [{ role: "system", content: "SYS" }, { role: "user", content: "USER" }], response_format: { type: "json_object" } });
+    expect(body.max_completion_tokens).toBeGreaterThanOrEqual(4000);
+    expect(body).not.toHaveProperty("temperature");
+    expect(res).toEqual({ text: '{"ranked":[]}', usage: { inputTokens: 12, outputTokens: 7, cacheReadTokens: 9 } });
+    vi.unstubAllGlobals();
+  });
+
+  it("accepts an endpoint that already ends in /openai/v1, and drives the rerank end to end", async () => {
+    const reply = JSON.stringify({ ranked: [{ id: "c2", score: 90, why: "Has led product teams in fintech and coached switchers." }] });
+    const f = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: reply } }] })));
+    vi.stubGlobal("fetch", f);
+    const provider = new FoundryOpenAILlmProvider("https://res.openai.azure.com/openai/v1", "k", "my-gpt", { maxRetries: 1, timeoutMs: 5000 });
+    const out = await rerank(seeker, candidates, provider);
+    expect(f.mock.calls[0]![0]).toBe("https://res.openai.azure.com/openai/v1/chat/completions");
+    expect(out).toEqual([{ id: "c2", score: 90, why: "Has led product teams in fintech and coached switchers." }]);
+    vi.unstubAllGlobals();
+  });
+
+  it("retries a 429, does not retry a 400, and falls back (null) when content is empty or not JSON", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const f = vi.fn().mockResolvedValueOnce(new Response("slow", { status: 429, headers: { "retry-after": "1" } })).mockResolvedValueOnce(new Response(JSON.stringify(ok)));
+    vi.stubGlobal("fetch", f);
+    const p = make().complete({ system: "S", user: "U", maxTokens: 10 });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect((await p).text).toBe('{"ranked":[]}');
+    expect(f).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+
+    const bad = vi.fn().mockResolvedValue(new Response("nope", { status: 400 }));
+    vi.stubGlobal("fetch", bad);
+    await expect(make().complete({ system: "S", user: "U", maxTokens: 10 })).rejects.toThrow("(400)");
+    expect(bad).toHaveBeenCalledTimes(1);
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: null } }] }))));
+    expect(await rerank(seeker, candidates, make())).toBeNull(); // empty content: validation fails twice, fallback
     vi.unstubAllGlobals();
   });
 });

@@ -72,6 +72,67 @@ export class FoundryLlmProvider implements LlmProvider {
 }
 
 /**
+ * OpenAI models on Azure AI Foundry (chat completions, OpenAI-compatible v1 route):
+ *   POST {FOUNDRY_ENDPOINT}/openai/v1/chat/completions  (header `api-key`, body `model` = deployment name)
+ * JSON mode is requested so the reply is a single JSON object; the rerank module still validates it.
+ * Reasoning-style models spend completion tokens on thinking, so the output budget is generous and
+ * `temperature` is left at the model default (some models reject any other value).
+ */
+export class FoundryOpenAILlmProvider implements LlmProvider {
+  constructor(
+    private endpoint: string,
+    private apiKey: string,
+    readonly model: string,
+    private opts: { maxRetries: number; timeoutMs: number },
+  ) {}
+
+  async complete(req: LlmRequest): Promise<LlmResponse> {
+    const base = this.endpoint.replace(/\/+$/, "").replace(/\/openai(\/v1)?$/, "");
+    const url = `${base}/openai/v1/chat/completions`;
+    const body = JSON.stringify({
+      model: this.model,
+      messages: [
+        { role: "system", content: req.system },
+        { role: "user", content: req.user },
+      ],
+      response_format: { type: "json_object" },
+      max_completion_tokens: Math.max(req.maxTokens, 4000),
+    });
+    const started = Date.now();
+    for (let attempt = 1; ; attempt++) {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json", "api-key": this.apiKey },
+        body,
+        signal: AbortSignal.timeout(this.opts.timeoutMs),
+      }).catch((err: unknown) => err as Error);
+
+      if (res instanceof Response && res.ok) {
+        const json = (await res.json()) as {
+          choices?: { message?: { content?: string | null } }[];
+          usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } };
+        };
+        const text = json.choices?.[0]?.message?.content ?? "";
+        const usage = {
+          inputTokens: json.usage?.prompt_tokens ?? 0,
+          outputTokens: json.usage?.completion_tokens ?? 0,
+          cacheReadTokens: json.usage?.prompt_tokens_details?.cached_tokens,
+        };
+        // Token counts and latency only: never prompt or completion content.
+        log.info("llm.call", { model: this.model, ...usage, ms: Date.now() - started, attempt });
+        return { text, usage };
+      }
+
+      const status = res instanceof Response ? res.status : 0;
+      const retryable = status === 0 || status === 429 || status >= 500;
+      if (!retryable || attempt > this.opts.maxRetries) throw new Error(`LLM request failed (${status || "network"})`);
+      const retryAfter = res instanceof Response ? Number(res.headers.get("retry-after")) : NaN;
+      await new Promise((r) => setTimeout(r, Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter, 20) * 1000 : 750 * 2 ** (attempt - 1)));
+    }
+  }
+}
+
+/**
  * Offline stand-in for the rerank model. Like a real model it only sees the prompt: it reads the
  * seeker and candidate blocks and ranks by text similarity, returning the same JSON contract.
  */
@@ -100,5 +161,8 @@ export class MockLlmProvider implements LlmProvider {
 export function llmProvider(): LlmProvider {
   const e = env();
   if (e.MOCK_AI) return new MockLlmProvider();
-  return new FoundryLlmProvider(e.FOUNDRY_ENDPOINT!, e.FOUNDRY_API_KEY!, e.LLM_DEPLOYMENT!, { maxRetries: 3, timeoutMs: 45_000 });
+  const opts = { maxRetries: 3, timeoutMs: 45_000 };
+  return e.LLM_PROVIDER === "openai"
+    ? new FoundryOpenAILlmProvider(e.FOUNDRY_ENDPOINT!, e.FOUNDRY_API_KEY!, e.LLM_DEPLOYMENT!, opts)
+    : new FoundryLlmProvider(e.FOUNDRY_ENDPOINT!, e.FOUNDRY_API_KEY!, e.LLM_DEPLOYMENT!, opts);
 }

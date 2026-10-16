@@ -7,12 +7,16 @@ import pg from "pg";
 async function main() {
   const url = process.env.DIRECT_DATABASE_URL ?? process.env.DATABASE_URL;
   if (!url) throw new Error("DIRECT_DATABASE_URL or DATABASE_URL is required");
-  const client = new pg.Client({ connectionString: url });
+  // A pg.Client cannot be reused after a failed connect, so each attempt gets a fresh one. Retrying covers
+  // Neon waking from scale-to-zero.
+  let client!: pg.Client;
   for (let attempt = 1; ; attempt++) {
+    client = new pg.Client({ connectionString: url });
     try {
-      await client.connect(); // retried: Neon may be waking from scale-to-zero
+      await client.connect();
       break;
     } catch (err) {
+      await client.end().catch(() => undefined);
       if (attempt >= 5) throw err;
       await new Promise((r) => setTimeout(r, 500 * 2 ** attempt));
     }
