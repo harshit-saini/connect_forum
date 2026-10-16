@@ -22,6 +22,6 @@ export default defineConfig({
     url: `http://localhost:${PORT}/api/health`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
-    env: { APP_URL: `http://localhost:${PORT}`, MOCK_AI: "true" },
+    env: { APP_URL: `http://localhost:${PORT}`, MOCK_AI: "true", NEXT_DIST_DIR: ".next-e2e" },
   },
 });
