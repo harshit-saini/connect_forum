@@ -75,7 +75,9 @@ export type Env = z.infer<typeof schema>;
 let cached: Env | undefined;
 
 export function parseEnv(source: NodeJS.ProcessEnv): Env {
-  const result = schema.safeParse(source);
+  // `KEY=` in a .env file yields "", which should behave like an unset variable.
+  const cleaned = Object.fromEntries(Object.entries(source).filter(([, v]) => v !== ""));
+  const result = schema.safeParse(cleaned);
   if (!result.success) {
     const lines = result.error.issues.map((i) => `  - ${i.path.join(".") || "(root)"}: ${i.message}`);
     throw new Error(`Invalid environment configuration:\n${lines.join("\n")}`);

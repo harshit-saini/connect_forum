@@ -2,7 +2,7 @@ import { defineConfig } from "drizzle-kit";
 import "dotenv/config";
 
 export default defineConfig({
-  schema: "./src/server/db/schema.ts",
+  schema: "./src/server/db/schema/index.ts",
   out: "./drizzle",
   dialect: "postgresql",
   // Migrations use the direct (non-pooled) URL when available.

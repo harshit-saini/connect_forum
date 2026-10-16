@@ -18,6 +18,11 @@ describe("parseEnv", () => {
     expect(env.ADMIN_EMAILS).toEqual(["a@x.com", "b@x.com"]);
   });
 
+  it("treats empty values from .env files as unset", () => {
+    const env = parseEnv({ ...base, MOCK_AI: "true", FOUNDRY_ENDPOINT: "", RESEND_API_KEY: "", DIRECT_DATABASE_URL: "" } as never);
+    expect(env.FOUNDRY_ENDPOINT).toBeUndefined();
+  });
+
   it("requires AI and email keys when not in mock mode", () => {
     expect(() => parseEnv({ ...base, MOCK_AI: "false" } as never)).toThrow(/FOUNDRY_API_KEY/);
   });
