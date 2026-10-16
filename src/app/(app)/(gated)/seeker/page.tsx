@@ -15,7 +15,7 @@ export default async function SeekerDashboard() {
     <div className="space-y-8">
       <div className="flex items-baseline justify-between">
         <h1 className="text-3xl font-semibold">Seeker dashboard</h1>
-        <Link href="/profile" className="text-sm underline">My profile</Link>
+        <nav aria-label="Seeker" className="flex gap-4 text-sm"><Link href="/seeker/connections" className="underline">My requests</Link><Link href="/profile" className="underline">My profile</Link></nav>
       </div>
       <FindGuides initial={initial} />
     </div>

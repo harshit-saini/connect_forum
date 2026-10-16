@@ -1,7 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/server/db/client";
-import { blocks, connectionRequests, guideProfiles, matchRuns, matches, reports, users } from "@/server/db/schema";
+import { blocks, connectionRequests, guideProfiles, jobs, matchRuns, matches, reports, users } from "@/server/db/schema";
 import { findCandidates, loadSeekerContext } from "@/server/matching/candidates";
 import { executeRun, startRun } from "@/server/matching/pipeline";
 import { processJobs } from "@/server/jobs/worker";
@@ -11,6 +11,7 @@ import { makeGuide, makeSeeker } from "./fixtures";
 
 beforeAll(async () => {
   await db().delete(users); // cascades: a clean slate so assertions about the pool are exact
+  await db().delete(jobs); // a stale backlog would crowd the worker's batch
 });
 
 async function candidateIds(seekerId: string) {
@@ -169,5 +170,25 @@ describe("the Find guides run", () => {
     const run = await startRun(a.id, 1);
     if (run.kind !== "started") throw new Error("expected started");
     expect(await getRunView(run.runId, b.id)).toBeNull();
+  });
+});
+
+describe("match ids stay stable when preliminary results become final", () => {
+  it("updates rows in place so a card the Seeker is clicking never disappears", async () => {
+    const { user: seeker } = await makeSeeker();
+    await makeGuide();
+    await makeGuide();
+    const run = await startRun(seeker.id, 1);
+    if (run.kind !== "started") throw new Error("expected started");
+    await executeRun(run.runId);
+    const before = await db().select().from(matches).where(eq(matches.runId, run.runId));
+    // Simulate a preliminary snapshot being read, then the final stage re-running over the same run.
+    await db().update(matchRuns).set({ status: "queued" }).where(eq(matchRuns.id, run.runId));
+    await executeRun(run.runId);
+    const after = await db().select().from(matches).where(eq(matches.runId, run.runId));
+    const idsBefore = new Map(before.map((m) => [m.guideId, m.id]));
+    const kept = after.filter((m) => idsBefore.has(m.guideId));
+    expect(kept.length).toBeGreaterThan(0);
+    expect(kept.every((m) => idsBefore.get(m.guideId) === m.id)).toBe(true);
   });
 });

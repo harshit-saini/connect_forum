@@ -1,6 +1,6 @@
 import "server-only";
 import { createHash } from "node:crypto";
-import { and, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, ne, notInArray, sql } from "drizzle-orm";
 import { MATCHING } from "@/config/matching";
 import type { GuideProfileData } from "@/schemas";
 import { db } from "@/server/db/client";
@@ -22,12 +22,19 @@ async function counter(name: string): Promise<number> {
   return row?.value ?? 0;
 }
 
-export function computeInputHash(parts: { profileVersion: number; poolVersion: number; ratingsVersion: number; embeddings: boolean }): string {
+export function computeInputHash(parts: { profileVersion: number; poolVersion: number; ratingsVersion: number; embeddings: boolean; connectionStamp: number }): string {
   return createHash("sha256").update(JSON.stringify(parts)).digest("hex");
+}
+
+/** Changes whenever one of this Seeker's requests is created or answered: those change who is eligible. */
+async function connectionStamp(seekerId: string): Promise<number> {
+  const res = await db().execute(sql`select coalesce(max(extract(epoch from greatest(created_at, coalesce(decided_at, created_at)))), 0)::float8 as stamp from connection_requests where seeker_id = ${seekerId}`);
+  return Number((res as unknown as { rows: { stamp: number }[] }).rows[0]!.stamp);
 }
 
 async function currentInputHash(seekerId: string, profileVersion: number) {
   return computeInputHash({
+    connectionStamp: await connectionStamp(seekerId),
     profileVersion,
     poolVersion: await counter(GUIDE_POOL_VERSION),
     ratingsVersion: await counter(RATINGS_VERSION),
@@ -117,6 +124,10 @@ export function genericExplanation(parts: StructuredParts, g: PublicGuide, seeke
   return sentence.replace(/, ([^,]*)\.$/, ", and $1.").replace(/^(.{1,200}).*$/, "$1");
 }
 
+/**
+ * Writes a run's matches. Existing rows for the same Guide are updated in place, so a match id the
+ * Seeker already sees (and may be clicking) stays valid when preliminary results become final.
+ */
 async function replaceMatches(
   runId: string,
   seekerId: string,
@@ -124,9 +135,20 @@ async function replaceMatches(
   status: "preliminary" | "final",
 ) {
   await db().transaction(async (tx) => {
-    await tx.delete(matches).where(eq(matches.runId, runId));
-    if (items.length === 0) return;
-    await tx.insert(matches).values(items.map((m, i) => ({ runId, seekerId, guideId: m.guideId, rank: i + 1, score: m.score, scoreBreakdown: m.breakdown, explanation: m.explanation, status })));
+    if (items.length === 0) {
+      await tx.delete(matches).where(eq(matches.runId, runId));
+      return;
+    }
+    await tx
+      .delete(matches)
+      .where(and(eq(matches.runId, runId), notInArray(matches.guideId, items.map((m) => m.guideId))));
+    await tx
+      .insert(matches)
+      .values(items.map((m, i) => ({ runId, seekerId, guideId: m.guideId, rank: i + 1, score: m.score, scoreBreakdown: m.breakdown, explanation: m.explanation, status })))
+      .onConflictDoUpdate({
+        target: [matches.runId, matches.guideId],
+        set: { rank: sql`excluded.rank`, score: sql`excluded.score`, scoreBreakdown: sql`excluded.score_breakdown`, explanation: sql`excluded.explanation`, status: sql`excluded.status` },
+      });
   });
 }
 

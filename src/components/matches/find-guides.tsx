@@ -4,12 +4,13 @@ import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import type { RunView } from "@/server/matching/view";
+import { ConnectButton } from "./connect-button";
 import { MatchCardView } from "./match-card";
 
 const STAGES = ["Starting your search", "Finding Guides who fit", "Ranking the best matches"];
 const ACTIVE = new Set(["queued", "matching", "ranking"]);
 
-export function FindGuides({ initial, renderAction }: { initial: RunView | null; renderAction?: (matchId: string) => React.ReactNode }) {
+export function FindGuides({ initial }: { initial: RunView | null }) {
   const [view, setView] = useState<RunView | null>(initial);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -107,7 +108,7 @@ export function FindGuides({ initial, renderAction }: { initial: RunView | null;
         <ol className="space-y-4">
           {view.matches.map((m) => (
             <li key={m.matchId}>
-              <MatchCardView match={m} action={renderAction?.(m.matchId)} />
+              <MatchCardView match={m} action={<ConnectButton matchId={m.matchId} alias={m.alias} onDone={() => void load(view!.id)} />} />
             </li>
           ))}
         </ol>

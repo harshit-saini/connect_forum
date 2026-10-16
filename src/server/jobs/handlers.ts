@@ -65,7 +65,7 @@ const notYet = (type: string): Handler => async () => {
 export const handlers: Record<JobType, Handler> = {
   embed_profile: embedProfile,
   match_run: async (job) => executeRun(String(job.payload.runId)),
-  send_email: async (job) => sendEmailJob(job.payload as Parameters<typeof sendEmailJob>[0]),
+  send_email: async (job) => sendEmailJob(job.payload as Parameters<typeof sendEmailJob>[0], job.id),
   rating_reminder: notYet("rating_reminder"),
 };
 

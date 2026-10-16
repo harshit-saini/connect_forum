@@ -18,10 +18,11 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: `pnpm exec next dev -p ${PORT}`,
+    // Production build: no dev-compile delays or pre-hydration races, and it is what ships.
+    command: `pnpm exec next build && pnpm exec next start -p ${PORT}`,
     url: `http://localhost:${PORT}/api/health`,
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: 240_000,
     env: { APP_URL: `http://localhost:${PORT}`, MOCK_AI: "true", NEXT_DIST_DIR: ".next-e2e" },
   },
 });
