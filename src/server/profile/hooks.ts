@@ -1,13 +1,18 @@
 import "server-only";
+import type { Db } from "@/server/db/client";
+import { env } from "@/server/env";
+import { queue } from "@/server/jobs";
 
-/**
- * Called inside the saving transaction after a profile is submitted or its matching-relevant answers
- * change. Milestone 5 queues the re-embedding job here.
- */
 export type ProfileChange = { userId: string; role: "seeker" | "guide"; profileVersion: number };
 
-export const profileChangeHooks: Array<(tx: unknown, change: ProfileChange) => Promise<void>> = [];
-
+/**
+ * Runs inside the saving transaction after a profile is submitted or its matching-relevant answers
+ * change, so the re-embedding job is queued atomically with the change. The job itself skips work when
+ * the embedding document is unchanged.
+ */
 export async function onProfileChanged(tx: unknown, change: ProfileChange) {
-  for (const hook of profileChangeHooks) await hook(tx, change);
+  if (!env().ENABLE_EMBEDDINGS) return;
+  await queue().enqueue(tx as Pick<Db, "insert">, "embed_profile", { userId: change.userId, role: change.role }, {
+    idempotencyKey: `embed:${change.userId}:${change.profileVersion}`,
+  });
 }

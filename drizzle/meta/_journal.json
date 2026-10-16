@@ -29,6 +29,13 @@
       "when": 1792131502576,
       "tag": "0003_clever_mephisto",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792131628721,
+      "tag": "0004_lean_penance",
+      "breakpoints": true
     }
   ]
 }
