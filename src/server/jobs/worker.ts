@@ -1,6 +1,6 @@
 import "server-only";
 import { log } from "@/server/logging/logger";
-import { handlers } from "./handlers";
+import { handlers, onDead } from "./handlers";
 import { queue, type JobRecord } from "./index";
 
 const HEARTBEAT_MS = 30_000;
@@ -19,6 +19,7 @@ async function runOne(job: JobRecord) {
   } catch (err) {
     const outcome = await q.fail(job.id, err);
     log.warn("job.failed", { jobId: job.id, type: job.type, attempt: job.attempts, outcome, error: err });
+    if (outcome === "dead") await onDead[job.type]?.(job, err instanceof Error ? err.message : "failed").catch(() => undefined);
   } finally {
     clearInterval(beat);
   }

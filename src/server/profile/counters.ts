@@ -16,3 +16,4 @@ export async function bumpCounter(tx: Tx, name: string): Promise<number> {
 }
 
 export const GUIDE_POOL_VERSION = "guide_pool_version";
+export const RATINGS_VERSION = "ratings_version";

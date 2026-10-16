@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import pg from "pg";
 
 /** Reads the latest mock sign-in code for an address from the dev outbox. */
@@ -29,8 +29,13 @@ async function resetAuthRateLimits() {
 export async function signIn(page: Page, email: string) {
   await resetAuthRateLimits();
   await page.goto("/sign-in");
-  await page.getByLabel("Email address").fill(email);
-  await page.getByRole("button", { name: "Email me a code" }).click();
+  // The first load of a page under `next dev` can be interacted with before React hydrates, which turns
+  // the click into a native form submit. Retry until the code step appears.
+  await expect(async () => {
+    await page.getByLabel("Email address").fill(email);
+    await page.getByRole("button", { name: "Email me a code" }).click();
+    await expect(page.getByLabel("6-digit code")).toBeVisible({ timeout: 3000 });
+  }).toPass({ timeout: 30_000 });
   const code = await latestCode(email);
   await page.getByLabel("6-digit code").fill(code);
   await page.getByRole("button", { name: "Sign in" }).click();

@@ -68,7 +68,7 @@ export const seekerSteps = (alias = uniqueAlias("Seek")) => ({
 
 export const guideSteps = (alias = uniqueAlias("Guide")) => ({
   basics: basics(alias),
-  background: background({ totalYears: 12, yearsInFunction: 8, seniority: "manager" }),
+  background: background({ totalYears: 12, yearsInFunction: 8, seniority: "manager", excludedCompanies: ["Globex Corp"] }),
   expertise: {
     primaryFunctions: ["product_management"],
     primaryIndustries: ["fintech"],
@@ -92,3 +92,37 @@ export const guideSteps = (alias = uniqueAlias("Guide")) => ({
     acknowledgement: true,
   },
 });
+
+// ---- completed profiles -----------------------------------------------------------------------
+import { saveStep, submitProfile } from "@/server/profile/service";
+
+type Steps = ReturnType<typeof seekerSteps>;
+type GSteps = ReturnType<typeof guideSteps>;
+
+export async function makeSeeker(mutate?: (s: Steps) => void) {
+  const u = await createUser("seeker");
+  const s = seekerSteps();
+  mutate?.(s);
+  for (const step of ["basics", "background", "goals", "preferences"] as const) {
+    const r = await saveStep({ userId: u.id, role: "seeker", step, values: s[step] });
+    if (!r.ok) throw new Error(`seeker ${step}: ${JSON.stringify(r)}`);
+  }
+  const r = await submitProfile({ userId: u.id, role: "seeker" });
+  if (!r.ok) throw new Error(`seeker submit: ${JSON.stringify(r)}`);
+  return { user: u, steps: s };
+}
+
+export async function makeGuide(mutate?: (s: GSteps) => void) {
+  const u = await createUser("guide");
+  const s = guideSteps();
+  mutate?.(s);
+  for (const step of ["basics", "background", "expertise"] as const) {
+    const r = await saveStep({ userId: u.id, role: "guide", step, values: s[step] });
+    if (!r.ok) throw new Error(`guide ${step}: ${JSON.stringify(r)}`);
+  }
+  const a = await saveStep({ userId: u.id, role: "guide", step: "availability", values: s.availability, phone: "+919876543210" });
+  if (!a.ok) throw new Error(`guide availability: ${JSON.stringify(a)}`);
+  const r = await submitProfile({ userId: u.id, role: "guide" });
+  if (!r.ok) throw new Error(`guide submit: ${JSON.stringify(r)}`);
+  return { user: u, steps: s };
+}

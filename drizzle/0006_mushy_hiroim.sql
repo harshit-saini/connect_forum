@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "match_runs_one_active_uq" ON "match_runs" USING btree ("seeker_id") WHERE status in ('queued','matching','ranking');

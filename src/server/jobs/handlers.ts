@@ -8,6 +8,8 @@ import { embeddingProvider } from "@/server/ai/embeddings";
 import { log } from "@/server/logging/logger";
 import { buildNeedsDoc, buildOffersDoc, DOC_TEMPLATE_VERSION } from "@/server/matching/documents";
 import type { GuideProfileData, SeekerProfileData } from "@/schemas";
+import { sendEmailJob } from "@/server/email/jobs";
+import { executeRun, failRun } from "@/server/matching/pipeline";
 import type { JobRecord, JobType } from "./queue";
 
 type Handler = (job: JobRecord) => Promise<void>;
@@ -59,10 +61,15 @@ const notYet = (type: string): Handler => async () => {
   throw new Error(`Job handler for ${type} is not implemented yet`);
 };
 
-/** Later milestones replace the stubs (match_run: 6, send_email: 6/7, rating_reminder: 9). */
+/** rating_reminder arrives in milestone 9. */
 export const handlers: Record<JobType, Handler> = {
   embed_profile: embedProfile,
-  match_run: notYet("match_run"),
-  send_email: notYet("send_email"),
+  match_run: async (job) => executeRun(String(job.payload.runId)),
+  send_email: async (job) => sendEmailJob(job.payload as Parameters<typeof sendEmailJob>[0]),
   rating_reminder: notYet("rating_reminder"),
+};
+
+/** Called once a job has used all its attempts, so user-visible state does not stay "in progress". */
+export const onDead: Partial<Record<JobType, (job: JobRecord, error: string) => Promise<void>>> = {
+  match_run: async (job, error) => failRun(String(job.payload.runId), error),
 };
