@@ -38,6 +38,8 @@ const schema = z
           .map((e) => e.trim().toLowerCase())
           .filter(Boolean),
       ),
+    /** Which API the chat deployment speaks: Claude (Anthropic Messages) or an OpenAI model (chat completions). */
+    LLM_PROVIDER: z.enum(["anthropic", "openai"]).default("anthropic"),
     FOUNDRY_ENDPOINT: z.string().url().optional(),
     FOUNDRY_API_KEY: z.string().optional(),
     LLM_DEPLOYMENT: z.string().optional(),

@@ -45,3 +45,12 @@ describe("parseEnv", () => {
     expect(() => parseEnv({ ...base, MOCK_AI: "true", VAULT_ENCRYPTION_KEY: "c2hvcnQ=" } as never)).toThrow(/32 bytes/);
   });
 });
+
+describe("LLM_PROVIDER", () => {
+  const live = { ...base, MOCK_AI: "false", ENABLE_EMBEDDINGS: "false", RESEND_API_KEY: "k", RESEND_WEBHOOK_SECRET: "s", FOUNDRY_ENDPOINT: "https://x.openai.azure.com", FOUNDRY_API_KEY: "k", LLM_DEPLOYMENT: "gpt" };
+  it("defaults to anthropic and accepts openai; anything else is rejected", () => {
+    expect(parseEnv(live as never).LLM_PROVIDER).toBe("anthropic");
+    expect(parseEnv({ ...live, LLM_PROVIDER: "openai" } as never).LLM_PROVIDER).toBe("openai");
+    expect(() => parseEnv({ ...live, LLM_PROVIDER: "gemini" } as never)).toThrow(/LLM_PROVIDER/);
+  });
+});
