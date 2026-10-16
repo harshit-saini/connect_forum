@@ -24,6 +24,10 @@ const schema = z
     RESEND_WEBHOOK_SECRET: z.string().optional(),
     FROM_EMAIL: z.string().min(3).default("Connect <no-reply@localhost>"),
     VAULT_ENCRYPTION_KEY: base64Key32,
+    /** Version tag stored with ciphertext made by VAULT_ENCRYPTION_KEY. Bump it when rotating. */
+    VAULT_KEY_VERSION: int(1, 1),
+    /** Retired keys, still needed to decrypt old rows until rotation finishes: "1:<base64>,2:<base64>". */
+    VAULT_PREVIOUS_KEYS: z.string().default(""),
     CRON_SECRET: z.string().min(16),
     ADMIN_EMAILS: z
       .string()
@@ -51,6 +55,12 @@ const schema = z
     MAX_LLM_RUNS_PER_DAY: int(200, 1),
   })
   .superRefine((env, ctx) => {
+    for (const entry of env.VAULT_PREVIOUS_KEYS.split(",").map((e) => e.trim()).filter(Boolean)) {
+      const [version, key] = entry.split(":");
+      if (!/^\d+$/.test(version ?? "") || Buffer.from(key ?? "", "base64").length !== 32 || Number(version) === env.VAULT_KEY_VERSION) {
+        ctx.addIssue({ code: "custom", path: ["VAULT_PREVIOUS_KEYS"], message: "expected 'version:base64key' pairs with 32-byte keys and versions different from VAULT_KEY_VERSION" });
+      }
+    }
     // MOCK_AI also switches Resend to a console/db mock, so real keys are only needed without it.
     if (env.MOCK_AI) return;
     if (env.NODE_ENV === "production" && env.APP_URL.startsWith("http://")) {

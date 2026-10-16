@@ -10,3 +10,10 @@ describe("redact", () => {
     expect(out.msg).toBe("call [phone] or [email]");
   });
 });
+
+describe("redact keeps identifiers intact", () => {
+  it("does not mangle UUIDs or short numbers", () => {
+    const id = "4c719812-3345-4a0b-8c11-123456789012";
+    expect(redact(`request ${id} approved in 120 ms`)).toBe(`request ${id} approved in 120 ms`);
+  });
+});

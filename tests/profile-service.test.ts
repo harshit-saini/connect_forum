@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { db } from "@/server/db/client";
 import { counters, guideProfiles, phoneVault, profileDrafts, seekerProfiles } from "@/server/db/schema";
 import { autosaveDraft, loadProfileState, saveStep, submitProfile } from "@/server/profile/service";
-import { open } from "@/server/vault";
+import { openRow } from "@/server/vault";
 import { createUser, guideSteps, seekerSteps, uniqueAlias } from "./fixtures";
 
 const PHONE = "+919876543210";
@@ -99,7 +99,7 @@ describe("guide onboarding", () => {
 
     const [row] = await db().select().from(phoneVault).where(eq(phoneVault.guideId, u.id));
     expect(row!.encryptedNumber.toString("utf8")).not.toContain("9876543210");
-    expect(open({ ciphertext: row!.encryptedNumber, iv: row!.iv, tag: row!.tag }, u.id)).toBe(PHONE);
+    expect(openRow(row!, u.id)).toBe(PHONE);
     expect(row!.last4).toBe("3210");
 
     expect(await submitProfile({ userId: u.id, role: "guide" })).toEqual({ ok: true });

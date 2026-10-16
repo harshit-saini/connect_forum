@@ -2,7 +2,8 @@ import "server-only";
 
 const SENSITIVE_KEY = /(email|phone|number|token|otp|code|secret|password|authorization|cookie|note|linkedin|name|review|text)/i;
 const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
-const PHONE_RE = /\+?\d[\d\s().-]{7,}\d/g;
+// Boundaries keep UUIDs and ids (digit runs next to letters or hyphens) from being mistaken for phone numbers.
+const PHONE_RE = /(?<![\w-])\+?\d[\d\s().-]{8,}\d(?![\w-])/g;
 
 /** Removes PII from arbitrary log values. Sensitive keys are dropped; emails/phones in strings are masked. */
 export function redact(value: unknown, depth = 0): unknown {

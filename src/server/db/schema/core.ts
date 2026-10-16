@@ -1,4 +1,4 @@
-import { index, integer, pgEnum, pgTable, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { users } from "./auth";
 
 export const roleEnum = pgEnum("role", ["seeker", "guide"]);
@@ -35,3 +35,23 @@ export const counters = pgTable("counters", {
   value: integer("value").notNull().default(0),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Append-only record of sensitive actions. `metadata` must never hold contact details or free text;
+ * the audit helper passes it through the logger's redaction first.
+ */
+export const auditLog = pgTable(
+  "audit_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
+    action: text("action").notNull(),
+    /** The other user involved (e.g. the Guide whose number was revealed). */
+    targetId: uuid("target_id").references(() => users.id, { onDelete: "set null" }),
+    subjectType: text("subject_type"),
+    subjectId: uuid("subject_id"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+  },
+  (t) => [index("audit_log_action_at_idx").on(t.action, t.at), index("audit_log_actor_idx").on(t.actorId), index("audit_log_target_idx").on(t.targetId)],
+);
