@@ -1,24 +1,26 @@
 import { expect, test } from "./fixtures";
-import { completeSeekerWizard, signIn, sql } from "./helpers";
+import { E2E_IDS, freeMemberIds, openFinder, registerSeeker, signIn, sql } from "./helpers";
+
+test.beforeAll(freeMemberIds);
+test.afterAll(freeMemberIds);
 
 // Needs seeded Guides (`pnpm seed`).
-test("sign in, profile, find guides, request, approve, reveal, rate", async ({ page, browser }) => {
+test("sign in, register, FAQs, find guides, request, approve, reveal, rate", async ({ page, browser }) => {
   const email = `happy-${Date.now()}@example.com`;
   const startedAt = new Date();
 
-  // 1. Sign in and choose a role
+  // 1. Sign in and register on the one-page form
   await signIn(page, email);
-  await page.getByRole("button", { name: "Continue as Seeker" }).click();
-  await expect(page).toHaveURL(/\/onboarding/);
+  await registerSeeker(page, E2E_IDS.seeker[1]!);
+  await expect(page).toHaveURL(/\/seeker$/);
 
-  // 2. Profile
-  await completeSeekerWizard(page);
+  // 2. The FAQs come first; this question still needs a Guide
+  await openFinder(page);
 
   // 3. Find guides
   await page.getByRole("button", { name: "Find guides" }).click();
   const first = page.getByRole("listitem").filter({ hasText: "Why this Guide" }).first();
   await expect(first).toBeVisible({ timeout: 60_000 });
-  await expect(first).toContainText("Director of Product"); // the best fit for an engineer moving into product
   const alias = (await first.getByRole("heading", { level: 3 }).textContent())!;
 
   // 4. Request

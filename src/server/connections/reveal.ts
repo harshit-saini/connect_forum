@@ -1,13 +1,12 @@
 import "server-only";
 import { and, eq, or } from "drizzle-orm";
-import type { GuideProfileData } from "@/schemas";
 import { audit } from "@/server/audit";
 import { db } from "@/server/db/client";
 import { blocks, connectionRequests, guideProfiles, unlocks, users } from "@/server/db/schema";
 import { decryptPhoneForReveal } from "@/server/vault/reveal";
 
 export type RevealResult =
-  | { ok: true; phone: string; contactPreference: string; bestTime: string }
+  | { ok: true; phone: string }
   | { ok: false; code: "not_found" | "not_approved" | "unavailable" };
 
 const DENY_REASONS = { not_found: "no_such_connection", not_approved: "not_approved", unavailable: "guide_unavailable" } as const;
@@ -51,6 +50,5 @@ export async function revealNumber(args: { seekerId: string; connectionId: strin
   if (!phone) return deny("unavailable", req.guideId);
 
   await audit(db(), { action: "phone.revealed", actorId: seekerId, targetId: req.guideId, subjectType: "connection_request", subjectId: req.id });
-  const a = (guide.data as unknown as GuideProfileData).availability;
-  return { ok: true, phone, contactPreference: a.contactPreference, bestTime: a.bestTime };
+  return { ok: true, phone };
 }

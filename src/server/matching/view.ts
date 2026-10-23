@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { MATCHING } from "@/config/matching";
 import type { GuideProfileData } from "@/schemas";
 import { db } from "@/server/db/client";
@@ -46,7 +46,7 @@ export async function getRunView(runId: string, seekerId: string): Promise<RunVi
     .from(matches)
     .innerJoin(userAliases, eq(userAliases.userId, matches.guideId))
     .innerJoin(guideProfiles, eq(guideProfiles.userId, matches.guideId))
-    .where(eq(matches.runId, runId))
+    .where(and(eq(matches.runId, runId), isNotNull(guideProfiles.memberId)))
     .orderBy(asc(matches.rank));
 
   const guideIds = rows.map((r) => r.m.guideId);

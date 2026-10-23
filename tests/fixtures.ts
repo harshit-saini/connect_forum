@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/server/db/client";
 import { users, userRoles } from "@/server/db/schema";
+import { saveProfile } from "@/server/profile/service";
 
 export async function createUser(role?: "seeker" | "guide", email = `u-${randomUUID()}@example.com`) {
   const [u] = await db().insert(users).values({ email, emailVerified: true }).returning();
@@ -10,119 +11,58 @@ export async function createUser(role?: "seeker" | "guide", email = `u-${randomU
 
 export const uniqueAlias = (p = "Test") => `${p}${Math.random().toString(36).slice(2, 8)}`;
 
-const basics = (alias: string) => ({
-  alias,
-  country: "IN",
-  timezone: "Asia/Kolkata",
-  languages: ["english", "hindi"],
-  consents: { terms: true, privacy: true, aiProcessing: true },
-});
+let seekerIds = 0;
+let guideIds = 0;
+/** The next member ID on the test allow-list (see tests/helpers/setup.ts). */
+export const nextSeekerMemberId = () => `S${process.env.TEST_MEMBER_PREFIX}${seekerIds++}`;
+export const nextGuideMemberId = () => `G${process.env.TEST_MEMBER_PREFIX}${guideIds++}`;
 
-const role = {
-  title: "Backend developer",
-  industry: "it_software",
-  function: "software_engineering",
-  startYear: 2018,
-  endYear: null,
-  summary: "Built payment APIs for a retail platform",
+export const PHONE = "+919876543210";
+
+export type SeekerForm = {
+  alias: string; memberId: string; category: string; query: string; languages: string[]; totalYears: number; agree: boolean;
+};
+export type GuideForm = {
+  alias: string; memberId: string; categories: string[]; jobTitle: string; totalYears: number; about: string;
+  languages: string[]; maxNewSeekersPerMonth: number; agree: boolean;
 };
 
-const background = (extra: object = {}) => ({
-  status: "employed_full_time",
-  jobTitle: "Software engineer",
-  industry: "it_software",
-  function: "software_engineering",
-  companyType: "mnc",
-  totalYears: 6,
-  yearsInFunction: 5,
-  seniority: "senior",
-  skills: ["Python", "SQL", "AWS"],
-  timeline: [role],
-  excludedCompanies: ["Acme Pvt Ltd"],
-  ...extra,
+export const seekerForm = (over: Partial<SeekerForm> = {}): SeekerForm => ({
+  alias: uniqueAlias("Seek"),
+  memberId: nextSeekerMemberId(),
+  category: "career_stagnation",
+  query: "I have been in the same role for five years and do not know how to move up.",
+  languages: ["english", "hindi"],
+  totalYears: 5,
+  agree: true,
+  ...over,
 });
 
-export const seekerSteps = (alias = uniqueAlias("Seek")) => ({
-  basics: basics(alias),
-  background: background({ totalYears: 2, yearsInFunction: 2, seniority: "entry", timeline: [] }),
-  goals: {
-    careerStage: "early_career",
-    primaryGoal: "switch_career",
-    targetRoles: ["Product manager"],
-    targetIndustries: ["fintech"],
-    targetFunction: "product_management",
-    timeline: "6_months",
-    jobSearchStatus: "preparing",
-    helpNeeded: ["career_switch", "interview_prep", "skill_roadmap"],
-    challenge: "I am an engineer who wants to move into product management but I do not know how to show relevant experience.",
-  },
-  preferences: {
-    minGuideExperience: "5",
-    mustShareLanguage: true,
-    similarTransition: true,
-    engagementStyle: "few_sessions",
-    mode: "video",
-    availability: ["tue.evening", "sat.morning"],
-  },
+export const guideForm = (over: Partial<GuideForm> = {}): GuideForm => ({
+  alias: uniqueAlias("Guide"),
+  memberId: nextGuideMemberId(),
+  categories: ["career_stagnation", "uncertainty"],
+  jobTitle: "Engineering manager",
+  totalYears: 12,
+  about: "I moved from engineer to manager and have mentored many people who felt stuck in their roles.",
+  languages: ["english", "hindi"],
+  maxNewSeekersPerMonth: 3,
+  agree: true,
+  ...over,
 });
 
-export const guideSteps = (alias = uniqueAlias("Guide")) => ({
-  basics: basics(alias),
-  background: background({ totalYears: 12, yearsInFunction: 8, seniority: "manager", excludedCompanies: ["Globex Corp"] }),
-  expertise: {
-    primaryFunctions: ["product_management"],
-    primaryIndustries: ["fintech"],
-    help: [
-      { type: "career_switch", level: "expert" },
-      { type: "interview_prep", level: "solid" },
-    ],
-    stagesBestAt: ["early_career", "career_switcher"],
-    transitions: ["changed_function"],
-    hiringExperience: "regular",
-    experienceSummary:
-      "I moved from engineering into product management a decade ago and have since led product teams, interviewed many candidates and mentored several career switchers.",
-  },
-  availability: {
-    maxNewSeekersPerMonth: 3,
-    availability: ["tue.evening", "wed.evening"],
-    sessionLength: "30",
-    mode: "video",
-    contactPreference: "call",
-    bestTime: "Weekday evenings",
-    acknowledgement: true,
-  },
-});
-
-// ---- completed profiles -----------------------------------------------------------------------
-import { saveStep, submitProfile } from "@/server/profile/service";
-
-type Steps = ReturnType<typeof seekerSteps>;
-type GSteps = ReturnType<typeof guideSteps>;
-
-export async function makeSeeker(mutate?: (s: Steps) => void) {
-  const u = await createUser("seeker");
-  const s = seekerSteps();
-  mutate?.(s);
-  for (const step of ["basics", "background", "goals", "preferences"] as const) {
-    const r = await saveStep({ userId: u.id, role: "seeker", step, values: s[step] });
-    if (!r.ok) throw new Error(`seeker ${step}: ${JSON.stringify(r)}`);
-  }
-  const r = await submitProfile({ userId: u.id, role: "seeker" });
-  if (!r.ok) throw new Error(`seeker submit: ${JSON.stringify(r)}`);
-  return { user: u, steps: s };
+export async function makeSeeker(over: Partial<SeekerForm> = {}) {
+  const u = await createUser();
+  const form = seekerForm(over);
+  const r = await saveProfile({ userId: u.id, role: "seeker", values: form });
+  if (!r.ok) throw new Error(`seeker: ${JSON.stringify(r)}`);
+  return { user: u, form };
 }
 
-export async function makeGuide(mutate?: (s: GSteps) => void) {
-  const u = await createUser("guide");
-  const s = guideSteps();
-  mutate?.(s);
-  for (const step of ["basics", "background", "expertise"] as const) {
-    const r = await saveStep({ userId: u.id, role: "guide", step, values: s[step] });
-    if (!r.ok) throw new Error(`guide ${step}: ${JSON.stringify(r)}`);
-  }
-  const a = await saveStep({ userId: u.id, role: "guide", step: "availability", values: s.availability, phone: "+919876543210" });
-  if (!a.ok) throw new Error(`guide availability: ${JSON.stringify(a)}`);
-  const r = await submitProfile({ userId: u.id, role: "guide" });
-  if (!r.ok) throw new Error(`guide submit: ${JSON.stringify(r)}`);
-  return { user: u, steps: s };
+export async function makeGuide(over: Partial<GuideForm> = {}) {
+  const u = await createUser();
+  const form = guideForm(over);
+  const r = await saveProfile({ userId: u.id, role: "guide", values: form, phone: PHONE });
+  if (!r.ok) throw new Error(`guide: ${JSON.stringify(r)}`);
+  return { user: u, form };
 }

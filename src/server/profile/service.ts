@@ -2,25 +2,19 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import type { ZodError } from "zod";
 import { normalizeEmpty } from "@/schemas/common";
-import {
-  profileSchema, STEP_ORDER, stepSchema, type GuideProfileData, type Role, type SeekerProfileData, type StepKey,
-} from "@/schemas";
+import { formSchema, type GuideProfileData, type Role, type SeekerProfileData } from "@/schemas";
 import { db } from "@/server/db/client";
-import { guideProfiles, profileDrafts, seekerProfiles, userAliases } from "@/server/db/schema";
+import { guideProfiles, seekerProfiles, userAliases, userRoles } from "@/server/db/schema";
+import { isKnownMemberId } from "@/server/members";
 import { deriveGuide, deriveSeeker, isMatchingChange } from "./derive";
 import { bumpCounter, GUIDE_POOL_VERSION } from "./counters";
 import { onProfileChanged } from "./hooks";
 import { isAcceptablePhone, phoneStatus, savePhone } from "./phone";
 
 export type FieldErrors = Record<string, string>;
-export type SaveResult = { ok: true } | { ok: false; fieldErrors: FieldErrors; formError?: string };
-export type SubmitResult = { ok: true } | { ok: false; step: StepKey; fieldErrors: FieldErrors; formError?: string };
-
-type Data = Record<string, Record<string, unknown>>;
-type DataStep = Exclude<StepKey, "review">;
+export type SaveResult = { ok: true; created: boolean } | { ok: false; fieldErrors: FieldErrors; formError?: string };
 
 const RESERVED_ALIASES = new Set(["admin", "administrator", "support", "moderator", "connect", "system", "staff", "help", "official"]);
-const MAX_DRAFT_BYTES = 60_000;
 
 export function zodFieldErrors(error: ZodError): FieldErrors {
   const out: FieldErrors = {};
@@ -35,36 +29,22 @@ function table(role: Role) {
   return role === "seeker" ? seekerProfiles : guideProfiles;
 }
 
-function uniqueViolation(err: unknown): boolean {
-  const e = err as { code?: string; cause?: { code?: string } };
-  return e?.code === "23505" || e?.cause?.code === "23505";
+function uniqueViolation(err: unknown): string | null {
+  const e = err as { code?: string; constraint?: string; cause?: { code?: string; constraint?: string } };
+  const code = e?.code ?? e?.cause?.code;
+  return code === "23505" ? (e?.constraint ?? e?.cause?.constraint ?? "unique") : null;
 }
 
+/** The saved profile of a user, or an empty state. Legacy rows (no member ID) count as not registered. */
 export async function loadProfileState(userId: string, role: Role) {
   const t = table(role);
   const [profile] = await db().select().from(t).where(eq(t.userId, userId)).limit(1);
-  const [draft] = await db().select().from(profileDrafts).where(eq(profileDrafts.userId, userId)).limit(1);
   const [alias] = await db().select().from(userAliases).where(eq(userAliases.userId, userId)).limit(1);
-  const completed = Boolean(profile?.profileCompletedAt);
-  const data = structuredClone((completed ? profile?.data : draft?.data) ?? {}) as Data;
-  if (alias) data.basics = { alias: alias.alias, ...(data.basics ?? {}) };
+  const completed = Boolean(profile?.profileCompletedAt && profile.memberId);
+  const data = (completed ? structuredClone(profile!.data) : {}) as Record<string, unknown>;
+  if (alias) data.alias = alias.alias;
   const phone = role === "guide" ? await phoneStatus(db(), userId) : { has: false, last4: null };
-  return { completed, data, stepReached: draft?.stepReached ?? 0, phone, profileVersion: profile?.profileVersion ?? 0 };
-}
-
-/** Claims or changes the user's alias. Returns an error message when it is taken or reserved. */
-async function claimAlias(tx: Pick<ReturnType<typeof db>, "insert">, userId: string, alias: string): Promise<string | null> {
-  if (RESERVED_ALIASES.has(alias.toLowerCase())) return "That alias is not available";
-  try {
-    await tx
-      .insert(userAliases)
-      .values({ userId, alias })
-      .onConflictDoUpdate({ target: userAliases.userId, set: { alias } });
-    return null;
-  } catch (err) {
-    if (uniqueViolation(err)) return "That alias is already taken";
-    throw err;
-  }
+  return { completed, data, memberId: completed ? profile!.memberId : null, phone, profileVersion: profile?.profileVersion ?? 0 };
 }
 
 class Abort extends Error {
@@ -73,135 +53,80 @@ class Abort extends Error {
   }
 }
 
-export async function saveStep(args: {
-  userId: string;
-  role: Role;
-  step: StepKey;
-  values: unknown;
-  phone?: string;
-}): Promise<SaveResult> {
-  const { userId, role, step } = args;
-  if (step === "review" || !STEP_ORDER[role].includes(step)) return { ok: false, fieldErrors: {}, formError: "Unknown step" };
-  const dataStep = step as DataStep;
-
-  const parsed = stepSchema(role, dataStep).safeParse(normalizeEmpty(args.values));
-  if (!parsed.success) return { ok: false, fieldErrors: zodFieldErrors(parsed.error) };
-  let stepData = parsed.data as Record<string, unknown>;
-
+/**
+ * Registers a new profile or updates the existing one from the single-page form.
+ *
+ *  - The member ID must be on the allow-list for the role (hard check) and can't be changed afterwards.
+ *  - A user keeps the one role they registered with; the role comes from the link they used.
+ *  - Guides must supply a phone number once; it goes to the encrypted vault, never into `data`.
+ */
+export async function saveProfile(args: { userId: string; role: Role; values: unknown; phone?: string }): Promise<SaveResult> {
+  const { userId, role } = args;
+  const raw = (args.values ?? {}) as Record<string, unknown>;
   const state = await loadProfileState(userId, role);
-  const fieldErrors: FieldErrors = {};
 
-  if (dataStep === "availability") {
+  // Registered members cannot change their ID: their stored one is used whatever the form says.
+  const input = normalizeEmpty({ ...raw, ...(state.memberId ? { memberId: state.memberId } : {}) });
+  const parsed = formSchema(role).safeParse(input);
+  const fieldErrors: FieldErrors = parsed.success ? {} : zodFieldErrors(parsed.error);
+
+  if (parsed.success && !state.memberId && !isKnownMemberId(role, parsed.data.memberId)) {
+    fieldErrors.memberId = "We couldn't find that member ID. Check it and try again.";
+  }
+  if (role === "guide") {
     if (args.phone) {
       if (!isAcceptablePhone(args.phone)) fieldErrors.phone = "Enter a valid number with country code";
     } else if (!state.phone.has) {
       fieldErrors.phone = "Your phone number is required";
     }
   }
-  if (Object.keys(fieldErrors).length) return { ok: false, fieldErrors };
+  if (!parsed.success || Object.keys(fieldErrors).length) return { ok: false, fieldErrors };
 
-  if (dataStep === "basics") {
-    const prev = state.data.basics as { consentedAt?: string } | undefined;
-    stepData = { ...stepData, consentedAt: prev?.consentedAt ?? new Date().toISOString() };
-  }
+  const { memberId, agree: _agree, ...answers } = parsed.data as { memberId: string; agree: true } & Record<string, unknown>;
+  void _agree;
+  const alias = (answers as { alias: string }).alias;
+  if (RESERVED_ALIASES.has(alias.toLowerCase())) return { ok: false, fieldErrors: { alias: "That alias is not available" } };
+
+  const prev = state.data as { consentedAt?: string };
+  const data = { ...answers, consentedAt: prev.consentedAt ?? new Date().toISOString() } as Record<string, unknown>;
+  const derived = role === "seeker" ? deriveSeeker(data as unknown as SeekerProfileData) : deriveGuide(data as unknown as GuideProfileData);
 
   try {
     await db().transaction(async (tx) => {
-      if (dataStep === "basics") {
-        const err = await claimAlias(tx, userId, (stepData as { alias: string }).alias);
-        if (err) throw new Abort({ alias: err });
-      }
+      // One role per account.
+      const [existing] = await tx.select().from(userRoles).where(eq(userRoles.userId, userId));
+      if (existing && existing.role !== role) throw new Abort({ _: `This account is registered as a ${existing.role === "guide" ? "Guide" : "Seeker"}.` });
+      if (!existing) await tx.insert(userRoles).values({ userId, role });
+
+      await tx.insert(userAliases).values({ userId, alias }).onConflictDoUpdate({ target: userAliases.userId, set: { alias } });
       if (args.phone) await savePhone(tx, userId, args.phone);
 
       const t = table(role);
-      if (!state.completed) {
-        const merged = { ...state.data, [dataStep]: stepData };
-        const reached = Math.max(state.stepReached, STEP_ORDER[role].indexOf(dataStep) + 1);
-        await tx
-          .insert(profileDrafts)
-          .values({ userId, role, data: merged, stepReached: reached })
-          .onConflictDoUpdate({ target: profileDrafts.userId, set: { data: merged, stepReached: reached, updatedAt: new Date() } });
-        return;
-      }
-
-      // Completed profiles are edited in place, and the whole profile must stay valid.
-      const merged = { ...state.data, [dataStep]: stepData } as Data;
-      const whole = profileSchema(role).safeParse(merged);
-      if (!whole.success) throw new Abort({ _: "This change would make your profile invalid" });
-      const matching = isMatchingChange(state.data, merged);
-      const derived = role === "seeker" ? deriveSeeker(whole.data as SeekerProfileData) : deriveGuide(whole.data as GuideProfileData);
-      const version = state.profileVersion + (matching ? 1 : 0);
+      const [row] = await tx.select({ version: t.profileVersion }).from(t).where(eq(t.userId, userId));
+      const before = state.completed ? (state.data as Record<string, unknown>) : undefined;
+      const matching = !state.completed || isMatchingChange(before, data);
+      const version = (row?.version ?? 0) + (matching ? 1 : 0);
+      const values = { data, ...derived, memberId, profileVersion: Math.max(version, 1), profileCompletedAt: state.completed ? undefined : new Date() };
       await tx
-        .update(t)
-        .set({ data: merged, ...derived, profileVersion: version, updatedAt: new Date() } as never)
-        .where(eq(t.userId, userId));
+        .insert(t)
+        .values({ userId, ...values } as never)
+        .onConflictDoUpdate({ target: t.userId, set: { ...values, updatedAt: new Date() } as never });
+
       if (matching) {
         if (role === "guide") await bumpCounter(tx, GUIDE_POOL_VERSION);
-        await onProfileChanged(tx, { userId, role, profileVersion: version });
+        await onProfileChanged(tx, { userId, role, profileVersion: Math.max(version, 1) });
       }
     });
   } catch (err) {
     if (err instanceof Abort) return { ok: false, fieldErrors: err.fieldErrors };
+    const violated = uniqueViolation(err);
+    if (violated) {
+      if (violated.includes("member_id")) return { ok: false, fieldErrors: { memberId: "This member ID is already registered." } };
+      return { ok: false, fieldErrors: { alias: "That alias is already taken" } };
+    }
     throw err;
   }
-  return { ok: true };
-}
-
-/** Autosave for unfinished profiles: stored loosely (validated on Next and on Submit), never phone numbers. */
-export async function autosaveDraft(args: { userId: string; role: Role; step: StepKey; values: unknown }): Promise<{ ok: boolean }> {
-  const { userId, role, step } = args;
-  if (step === "review" || !STEP_ORDER[role].includes(step)) return { ok: false };
-  const state = await loadProfileState(userId, role);
-  if (state.completed) return { ok: false };
-  const values = normalizeEmpty(args.values);
-  if (!values || typeof values !== "object" || Array.isArray(values)) return { ok: false };
-  const copy = { ...(values as Record<string, unknown>) };
-  delete copy.phone;
-  if (JSON.stringify(copy).length > MAX_DRAFT_BYTES) return { ok: false };
-  // The alias is only claimed by an explicit Next, so autosave must not hold names hostage.
-  const merged = { ...state.data, [step]: copy };
-  await db()
-    .insert(profileDrafts)
-    .values({ userId, role, data: merged, stepReached: state.stepReached })
-    .onConflictDoUpdate({ target: profileDrafts.userId, set: { data: merged, updatedAt: new Date() } });
-  return { ok: true };
-}
-
-export async function submitProfile(args: { userId: string; role: Role }): Promise<SubmitResult> {
-  const { userId, role } = args;
-  const state = await loadProfileState(userId, role);
-  if (state.completed) return { ok: true };
-
-  const whole = profileSchema(role).safeParse(state.data);
-  if (!whole.success) {
-    const first = whole.error.issues[0]!;
-    const step = String(first.path[0]) as StepKey;
-    const fieldErrors = zodFieldErrors(whole.error);
-    return { ok: false, step: STEP_ORDER[role].includes(step) ? step : STEP_ORDER[role][0]!, fieldErrors: stripPrefix(fieldErrors, step) };
-  }
-  if (role === "guide" && !state.phone.has) {
-    return { ok: false, step: "availability", fieldErrors: { phone: "Your phone number is required" } };
-  }
-
-  await db().transaction(async (tx) => {
-    const t = table(role);
-    const derived = role === "seeker" ? deriveSeeker(whole.data as SeekerProfileData) : deriveGuide(whole.data as GuideProfileData);
-    const values = { data: whole.data as Record<string, unknown>, ...derived, profileVersion: 1, profileCompletedAt: new Date() };
-    await tx
-      .insert(t)
-      .values({ userId, ...values } as never)
-      .onConflictDoUpdate({ target: t.userId, set: { ...values, updatedAt: new Date() } as never });
-    await tx.delete(profileDrafts).where(eq(profileDrafts.userId, userId));
-    if (role === "guide") await bumpCounter(tx, GUIDE_POOL_VERSION);
-    await onProfileChanged(tx, { userId, role, profileVersion: 1 });
-  });
-  return { ok: true };
-}
-
-function stripPrefix(errors: FieldErrors, step: string): FieldErrors {
-  const out: FieldErrors = {};
-  for (const [k, v] of Object.entries(errors)) if (k.startsWith(`${step}.`)) out[k.slice(step.length + 1)] = v;
-  return out;
+  return { ok: true, created: !state.completed };
 }
 
 export async function suggestFreeAlias(generate: () => string): Promise<string> {

@@ -1,18 +1,18 @@
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { requireRole } from "@/server/viewer";
+import { requireViewer } from "@/server/viewer";
 import { DeleteAccount } from "./delete-account";
 
 export const metadata = { title: "Settings" };
 
 export default async function Settings() {
-  const viewer = await requireRole();
+  const viewer = await requireViewer();
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <h1 className="text-3xl font-semibold">Settings</h1>
       <Card className="space-y-1 text-sm">
         <h2 className="font-semibold">Account</h2>
-        <p>Signed in as <strong>{viewer.email}</strong> · <span className="capitalize">{viewer.role}</span></p>
+        <p>Signed in as <strong>{viewer.email}</strong>{viewer.role && <> · <span className="capitalize">{viewer.role}</span></>}</p>
       </Card>
       <Card className="space-y-3">
         <h2 className="font-semibold">Export your data</h2>

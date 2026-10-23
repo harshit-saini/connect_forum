@@ -1,5 +1,6 @@
 import "server-only";
 import { z } from "zod";
+import { MEMBER_ID_SHAPE, parseMemberIds } from "@/lib/member-id";
 
 const bool = (def: boolean) =>
   z
@@ -12,6 +13,9 @@ const int = (def: number, min = 0) => z.coerce.number().int().min(min).default(d
 const base64Key32 = z
   .string()
   .refine((v) => Buffer.from(v, "base64").length === 32, "must be 32 bytes, base64-encoded (openssl rand -base64 32)");
+
+/** A list of member IDs from an environment variable, normalised (upper-case, no spaces) and de-duplicated. */
+const memberIds = z.string().default("").transform(parseMemberIds);
 
 const schema = z
   .object({
@@ -38,6 +42,9 @@ const schema = z
           .map((e) => e.trim().toLowerCase())
           .filter(Boolean),
       ),
+    /** The IDs allowed to register as a Guide / as a Seeker (comma- or newline-separated). Empty means nobody can. */
+    GUIDE_MEMBER_IDS: memberIds,
+    SEEKER_MEMBER_IDS: memberIds,
     /** Which API the chat deployment speaks: Claude (Anthropic Messages) or an OpenAI model (chat completions). */
     LLM_PROVIDER: z.enum(["anthropic", "openai"]).default("anthropic"),
     FOUNDRY_ENDPOINT: z.string().url().optional(),
@@ -57,6 +64,10 @@ const schema = z
     MAX_LLM_RUNS_PER_DAY: int(200, 1),
   })
   .superRefine((env, ctx) => {
+    for (const key of ["GUIDE_MEMBER_IDS", "SEEKER_MEMBER_IDS"] as const) {
+      const bad = env[key].find((id) => !MEMBER_ID_SHAPE.test(id));
+      if (bad) ctx.addIssue({ code: "custom", path: [key], message: `"${bad}" is not a valid member ID (letters, digits, . _ / - only, 2 to 40 characters)` });
+    }
     for (const entry of env.VAULT_PREVIOUS_KEYS.split(",").map((e) => e.trim()).filter(Boolean)) {
       const [version, key] = entry.split(":");
       if (!/^\d+$/.test(version ?? "") || Buffer.from(key ?? "", "base64").length !== 32 || Number(version) === env.VAULT_KEY_VERSION) {
@@ -75,6 +86,9 @@ const schema = z
     const need = (key: keyof typeof env, why: string) => {
       if (!env[key]) ctx.addIssue({ code: "custom", path: [key], message: `required when MOCK_AI=false (${why})` });
     };
+    // The hard member-ID check fails closed: with an empty list no one could ever register.
+    if (env.GUIDE_MEMBER_IDS.length === 0) ctx.addIssue({ code: "custom", path: ["GUIDE_MEMBER_IDS"], message: "required when MOCK_AI=false (member-ID check)" });
+    if (env.SEEKER_MEMBER_IDS.length === 0) ctx.addIssue({ code: "custom", path: ["SEEKER_MEMBER_IDS"], message: "required when MOCK_AI=false (member-ID check)" });
     need("RESEND_API_KEY", "email");
     need("RESEND_WEBHOOK_SECRET", "email webhook");
     need("FOUNDRY_ENDPOINT", "chat model");

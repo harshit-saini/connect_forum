@@ -4,8 +4,7 @@ import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
-type Revealed = { phone: string; contactPreference: string; bestTime: string };
-const PREF: Record<string, string> = { call: "Please call", text: "Please send a text message", either: "Call or text, whichever you prefer" };
+type Revealed = { phone: string };
 
 /** Fetches the number on demand. It lives only in component state: it is never persisted or cached. */
 export function RevealNumber({ connectionId }: { connectionId: string }) {
@@ -51,7 +50,6 @@ export function RevealNumber({ connectionId }: { connectionId: string }) {
     <Card className="space-y-3">
       <h2 className="text-xl font-semibold">Contact this Guide</h2>
       <p className="text-3xl font-semibold tracking-wide" data-testid="revealed-number">{data.phone}</p>
-      <p className="text-sm">{PREF[data.contactPreference] ?? ""}. Best time: {data.bestTime}.</p>
       <div className="flex flex-wrap gap-3">
         <a href={`tel:${data.phone}`} className="inline-flex min-h-11 items-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground">Call</a>
         <Button variant="outline" onClick={async () => { await navigator.clipboard?.writeText(data.phone).catch(() => undefined); setCopied(true); }}>{copied ? "Copied" : "Copy"}</Button>

@@ -37,13 +37,13 @@ With `MOCK_AI=true` the app runs fully offline: the LLM, the embeddings and e-ma
 psql "$DATABASE_URL" -c "select \"to\", subject, left(text, 200) from dev_outbox order by created_at desc limit 3"
 ```
 
-Seeded accounts (sign in with the e-mail; the one-time code lands in `dev_outbox`):
+Seeded accounts (sign in with the e-mail; the one-time code lands in `dev_outbox`). The seed registers them through the real form logic, so the member-ID check applies: list `SEED-GUIDE-1…12` in `GUIDE_MEMBER_IDS` and `SEED-SEEKER-1…6` in `SEEKER_MEMBER_IDS` before running `pnpm seed` (and the `E2E-*` IDs from `playwright.config.ts` for `pnpm test:e2e`).
 
 | Account | Role |
 |---|---|
 | `seed-seeker-1@example.com` … `seed-seeker-6@example.com` | Seeker (profile complete) |
 | `seed-guide-1@example.com` … `seed-guide-12@example.com` | Guide (profile complete) |
-| any address listed in `ADMIN_EMAILS` | Admin (after picking a role once) |
+| any address listed in `ADMIN_EMAILS` | Admin (no member ID needed) |
 
 Local Postgres with pgvector, via Docker: `docker run -d -p 5432:5432 -e POSTGRES_USER=cf -e POSTGRES_PASSWORD=cf -e POSTGRES_DB=connect_forum pgvector/pgvector:pg16`.
 
@@ -53,9 +53,11 @@ Scripts: `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm test:e2e`, `pnpm db:g
 
 ## How it works
 
-1. **Sign in** with e-mail (a 6-digit one-time code, plus a link that pre-fills it). The first sign-in picks Seeker or Guide.
-2. **Mandatory profile**: a multi-step wizard with autosave and resume. Every page except Settings and sign-out redirects to `/onboarding` until the profile is complete. A Guide's phone number goes straight into an AES-256-GCM vault and is never stored anywhere else.
-3. **Find guides** (Seeker, on demand): hard filters in SQL, a structured score, pgvector similarity, then an LLM rerank on *public fields only*, with a non-LLM fallback. Preliminary matches appear first and are upgraded in place; the Seeker is also e-mailed.
+1. **Join through a link.** Seekers use `/join/seeker` (the link to host on the website, e.g. GACS.world); Guides get `/join/guide` by e-mail from *Admin → Invite Guides*. Both ask the visitor to sign in with e-mail (a 6-digit one-time code) and then show **one short page**.
+2. **Member ID check (hard).** The form asks for the member ID. It must be on the role's allow-list: `GUIDE_MEMBER_IDS` for Guides, `SEEKER_MEMBER_IDS` for Seekers (case and spaces ignored; a Guide ID doesn't work for a Seeker). Each ID registers one account and can't be changed afterwards. With an empty list nobody can register. A Seeker form is category, question, years of experience and languages; a Guide form is categories, role, a short "how can you help", years, languages, monthly capacity and a phone number (AES-256-GCM vault, never stored anywhere else). Pages other than Settings and sign-out stay gated until registration is complete.
+   - **Categories (pilot):** Layoff / Unemployment, Career Stagnation, Upskilling / Training, Uncertainty (`src/config/taxonomy.ts`). A Seeker picks one; a Guide picks every one they can help with. A Guide is only matched to Seekers in their categories.
+   - **FAQs first.** Before a Seeker's first search the dashboard shows the FAQs for their category (`src/config/faqs.ts`, also at `/faq`). *This answered my question* ends it there; *I still need a Guide* continues to matching. Outcomes are counted per category (no text stored) on the Admin home page.
+3. **Find guides** (Seeker, on demand): hard filters in SQL (category, shared language, experience, capacity, blocks), a structured score (languages, experience, focus), pgvector similarity, then an LLM rerank on *public fields only*, with a non-LLM fallback. Preliminary matches appear first and are upgraded in place; the Seeker is also e-mailed.
 4. **Request**: the Seeker adds an optional note (screened for contact details). The Guide gets an e-mail with an anonymous summary and a **single-use link**, and approves or declines with a POST. No login needed.
 5. **Reveal**: after approval the Seeker opens the connection and presses *Show number*. The server checks the unlock for that exact pair, decrypts, rate-limits, audits and returns the number with `Cache-Control: no-store`.
 6. **Rating**: `RATING_DELAY_DAYS` after approval the Seeker is reminded to rate (1–5, optional private review). Guides see only an average and count, hidden until 3 ratings.
@@ -69,9 +71,9 @@ Admins (`ADMIN_EMAILS`) can list and suspend users, review reports, read ratings
 ```
 src/
   app/                   routes (App Router): (public) (setup) (app)/(gated) admin, api/*, review/[token]
-  components/            ui/ (shadcn-style primitives), form/, wizard/, matches/, safety/, pwa/, admin/
+  components/            ui/ (shadcn-style primitives), form/, join/ (the one-page form), faq/, profile/, matches/, safety/, pwa/
   config/                taxonomy.ts (all option lists), matching.ts (all weights/limits), safety.ts
-  schemas/               zod schemas shared by browser and server (one per wizard step)
+  schemas/               zod schemas shared by browser and server (one seeker form, one guide form)
   lib/                   screening.ts (contact-detail screening), countries, alias, utils
   server/                server-only code (`import "server-only"`)
     db/                  Drizzle client + schema (auth, core, profiles, jobs, matching)
@@ -107,6 +109,7 @@ Validated with zod at server start (`src/server/env.ts`); a bad config fails fas
 | `VAULT_KEY_VERSION` | no (1) | Version tag of the current vault key (see [rotation](#vault-key-rotation)). |
 | `VAULT_PREVIOUS_KEYS` | no | Retired keys as `1:<base64>,2:<base64>`, needed until rotation finishes. |
 | `ADMIN_EMAILS` | no | Comma-separated. Matched against the *verified* sign-in e-mail. |
+| `GUIDE_MEMBER_IDS` / `SEEKER_MEMBER_IDS` | live | Allow-lists for the member-ID check, comma- or newline-separated. Required when `MOCK_AI=false`. |
 | `FROM_EMAIL` | yes\* | Sender, e.g. `Connect <no-reply@mail.example.com>`. |
 | `RESEND_API_KEY` | live | Resend API key. |
 | `RESEND_WEBHOOK_SECRET` | live | Resend webhook signing secret (`whsec_…`). |
@@ -120,13 +123,19 @@ Validated with zod at server start (`src/server/env.ts`); a bad config fails fas
 | `MOCK_AI` | no (false) | `true` mocks the LLM, embeddings and e-mail. **Refused on a Vercel production deploy.** |
 | `RATING_DELAY_DAYS` | no (3) | Days after approval before the rating reminder. |
 | `MAX_PENDING_REQUESTS` | no (3) | Pending requests a Seeker may have at once. |
-| `MIN_GUIDE_EXPERIENCE_YEARS` | no (3) | Guides below this finish onboarding but are not matched. |
+| `MIN_GUIDE_EXPERIENCE_YEARS` | no (3) | Guides below this register but are not matched. |
 | `MATCH_COOLDOWN_MINUTES` | no (60) | Minimum gap between a Seeker's searches. |
 | `MATCH_MAX_RUNS_PER_DAY` | no (3) | Searches per Seeker per rolling 24 h. |
 | `MATCH_MAX_CONCURRENCY` | no (5) | Global cap on simultaneously running match jobs. |
 | `MAX_LLM_RUNS_PER_DAY` | no (200) | Global LLM budget; beyond it, runs still happen but rank without the LLM. |
 
 \* "live" means required when `MOCK_AI=false`. Embedding keys are not needed when `ENABLE_EMBEDDINGS=false`.
+
+---
+
+## Upgrading an existing deployment to the pilot form
+
+Migration `0007_pilot_simple_profile` is **additive**: it adds `member_id`, `category`/`categories` and the `faq_events` table and deletes nothing. Profiles created with the old long wizard have no member ID, so those members are treated as not registered: they are asked to register again on `/join/seeker` or `/join/guide` (their old answers stay in the database, unused) and are left out of matching until they do. Before deploying set `GUIDE_MEMBER_IDS` and `SEEKER_MEMBER_IDS`: with `MOCK_AI=false` the app refuses to start without them, so the check can never be left open by accident.
 
 ---
 
@@ -139,7 +148,7 @@ pnpm test:e2e    # Playwright against a production build, with mock AI
 ```
 
 - **Vitest** (≈160 tests): matching filters and scoring, rerank validation and prompt-injection containment, vault crypto and rotation, tokens and CSRF, validators and screening, the queue (concurrent claims, caps, backoff, stale recovery), connections, reveal, ratings, admin, export/delete, webhook signatures, and the service worker's routing.
-- **Playwright**: the happy path (sign-in → profile → Find guides → request → approve → reveal → rate), plus onboarding for both roles, the gate, admin, the PWA (real cache inspection and offline behaviour) and the Guide dashboard. Every e2e test fails on hydration errors and CSP violations. They need seeded data (`pnpm seed`) and a Postgres database (`DATABASE_URL`).
+- **Playwright**: the happy path (sign-in → register → FAQs → Find guides → request → approve → reveal → rate), plus registration for both roles (member-ID check, FAQs), the gate, admin, the PWA (real cache inspection and offline behaviour) and the Guide dashboard. Every e2e test fails on hydration errors and CSP violations. They need seeded data (`pnpm seed`) and a Postgres database (`DATABASE_URL`).
 - In the sandbox this was built in, Playwright's bundled browser wasn't installable; set `CHROMIUM_PATH` to use another Chromium. CI installs it normally.
 
 CI (`.github/workflows/ci.yml`) runs typecheck, lint, tests and build, and a separate Playwright job, both with a `pgvector/pgvector:pg16` service.

@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
-import { overview } from "@/server/admin/service";
+import { CATEGORIES } from "@/config/taxonomy";
+import { faqStats, overview } from "@/server/admin/service";
 
 export const metadata = { title: "Admin" };
 export const dynamic = "force-dynamic";
 
 export default async function AdminHome() {
-  const o = await overview();
+  const [o, faq] = await Promise.all([overview(), faqStats()]);
   const stats: Array<[string, number, string]> = [
     ["Users", o.users, "/admin/users"],
     ["Seekers (profile complete)", o.seekers, "/admin/users"],
@@ -29,6 +30,20 @@ export default async function AdminHome() {
           </li>
         ))}
       </ul>
+      <Link href="/admin/invite" className="inline-block text-sm font-medium underline">Invite Guides by email</Link>
+
+      <section aria-labelledby="faq-stats" className="space-y-3">
+        <h2 id="faq-stats" className="text-xl font-semibold">FAQ self-service</h2>
+        <p className="text-sm text-muted">Seekers who said the FAQs answered their question, versus those who still needed a Guide.</p>
+        <table className="w-full text-sm">
+          <thead><tr className="text-left text-muted"><th className="py-1 font-medium">Category</th><th className="font-medium">Answered by FAQ</th><th className="font-medium">Went to a Guide</th></tr></thead>
+          <tbody>
+            {CATEGORIES.map((c) => (
+              <tr key={c.value} className="border-t border-border"><td className="py-1.5">{c.label}</td><td>{faq.get(c.value)?.resolved ?? 0}</td><td>{faq.get(c.value)?.escalated ?? 0}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
     </div>
   );
 }

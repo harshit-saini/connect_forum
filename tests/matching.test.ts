@@ -1,7 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/server/db/client";
-import { blocks, connectionRequests, guideProfiles, jobs, matchRuns, matches, reports, users } from "@/server/db/schema";
+import { blocks, connectionRequests, guideProfiles, jobs, matchRuns, matches, reports, seekerProfiles, users } from "@/server/db/schema";
 import { findCandidates, loadSeekerContext } from "@/server/matching/candidates";
 import { executeRun, startRun } from "@/server/matching/pipeline";
 import { processJobs } from "@/server/jobs/worker";
@@ -21,20 +21,21 @@ async function candidateIds(seekerId: string) {
 
 describe("hard filters", () => {
   it("includes an eligible guide and excludes each ineligible one", async () => {
-    const seeker = (await makeSeeker()).user;
+    const seeker = (await makeSeeker()).user; // career_stagnation, speaks English and Hindi
     const ok = (await makeGuide()).user;
-    const paused = (await makeGuide((s) => (s.availability as Record<string, unknown>).pauseMatching = true)).user;
-    const junior = (await makeGuide((s) => { s.background.totalYears = 2; s.background.yearsInFunction = 2; })).user;
-    const belowSeekerMin = (await makeGuide((s) => { s.background.totalYears = 4; s.background.yearsInFunction = 4; })).user; // seeker wants 5+
-    const noLang = (await makeGuide((s) => (s.basics.languages = ["french"]))).user;
-    const sharedEmployer = (await makeGuide((s) => (s.background.excludedCompanies = ["ACME Limited"]))).user; // seeker excludes "Acme Pvt Ltd"
-    const wontHelp = (await makeGuide((s) => ((s.expertise as Record<string, unknown>).wontHelpWith = { types: ["career_switch"] }))).user;
+    const paused = (await makeGuide()).user;
+    const junior = (await makeGuide({ totalYears: 1 })).user;
+    const otherCategory = (await makeGuide({ categories: ["upskilling_training", "layoff_unemployment"] })).user;
+    const noLang = (await makeGuide({ languages: ["tamil"] })).user;
     const suspended = (await makeGuide()).user;
     const blockedByGuide = (await makeGuide()).user;
     const reported = (await makeGuide()).user;
     const pending = (await makeGuide()).user;
-    const full = (await makeGuide((s) => (s.availability.maxNewSeekersPerMonth = 1))).user;
+    const full = (await makeGuide({ maxNewSeekersPerMonth: 1 })).user;
+    const legacy = (await makeGuide()).user; // registered before the pilot: no member ID on file
 
+    await db().update(guideProfiles).set({ matchingPaused: true }).where(eq(guideProfiles.userId, paused.id));
+    await db().update(guideProfiles).set({ memberId: null }).where(eq(guideProfiles.userId, legacy.id));
     await db().update(users).set({ suspendedAt: new Date() }).where(eq(users.id, suspended.id));
     await db().insert(blocks).values({ blockerId: blockedByGuide.id, blockedId: seeker.id });
     await db().insert(reports).values({ reporterId: seeker.id, reportedId: reported.id, reason: "spam" });
@@ -47,15 +48,24 @@ describe("hard filters", () => {
 
     const ids = await candidateIds(seeker.id);
     expect(ids).toContain(ok.id);
-    for (const [name, g] of Object.entries({ paused, junior, belowSeekerMin, noLang, sharedEmployer, wontHelp, suspended, blockedByGuide, reported, pending, full })) {
+    for (const [name, g] of Object.entries({ paused, junior, otherCategory, noLang, suspended, blockedByGuide, reported, pending, full, legacy })) {
       expect(ids, name).not.toContain(g.id);
     }
   });
 
-  it("only requires a shared language when the seeker asked for it", async () => {
-    const relaxed = (await makeSeeker((s) => ((s.preferences as Record<string, unknown>).mustShareLanguage = false))).user;
-    const french = (await makeGuide((s) => (s.basics.languages = ["french"]))).user;
-    expect(await candidateIds(relaxed.id)).toContain(french.id);
+  it("matches a guide who covers the seeker's category among several", async () => {
+    const seeker = (await makeSeeker({ category: "uncertainty" })).user;
+    const multi = (await makeGuide({ categories: ["layoff_unemployment", "uncertainty", "upskilling_training"] })).user;
+    expect(await candidateIds(seeker.id)).toContain(multi.id);
+  });
+
+  it("requires a shared language", async () => {
+    const seeker = (await makeSeeker({ languages: ["tamil"] })).user;
+    const english = (await makeGuide({ languages: ["english"] })).user;
+    const tamil = (await makeGuide({ languages: ["tamil", "english"] })).user;
+    const ids = await candidateIds(seeker.id);
+    expect(ids).toContain(tamil.id);
+    expect(ids).not.toContain(english.id);
   });
 
   it("allows a guide again after a past request was declined or expired", async () => {
@@ -65,10 +75,10 @@ describe("hard filters", () => {
     expect(await candidateIds(seeker.id)).toContain(g.id);
   });
 
-  it("does not consider a Guide whose profile is below the platform minimum experience", async () => {
-    const seeker = (await makeSeeker((s) => ((s.preferences as Record<string, unknown>).minGuideExperience = "0"))).user;
-    const tooJunior = (await makeGuide((s) => { s.background.totalYears = 1; s.background.yearsInFunction = 1; })).user;
-    expect(await candidateIds(seeker.id)).not.toContain(tooJunior.id);
+  it("does not load a legacy seeker (no member ID) for matching", async () => {
+    const { user } = await makeSeeker();
+    await db().update(seekerProfiles).set({ memberId: null }).where(eq(seekerProfiles.userId, user.id));
+    expect(await loadSeekerContext(user.id, true)).toBeNull();
   });
 });
 

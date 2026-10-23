@@ -6,39 +6,27 @@ import { mockEmbed } from "@/server/ai/embeddings";
 import { embedProfile } from "@/server/jobs/handlers";
 import { processJobs } from "@/server/jobs/worker";
 import { buildNeedsDoc, buildOffersDoc } from "@/server/matching/documents";
-import { saveStep, submitProfile } from "@/server/profile/service";
+import { saveProfile } from "@/server/profile/service";
 import type { GuideProfileData, SeekerProfileData } from "@/schemas";
-import { createUser, guideSteps, seekerSteps } from "./fixtures";
+import { guideForm, makeGuide, makeSeeker, seekerForm } from "./fixtures";
 
 const cosine = (a: number[], b: number[]) => a.reduce((s, x, i) => s + x * b[i]!, 0);
 
-async function completedSeeker(mutate?: (s: ReturnType<typeof seekerSteps>) => void) {
-  const u = await createUser("seeker");
-  const steps = seekerSteps();
-  mutate?.(steps);
-  for (const step of ["basics", "background", "goals", "preferences"] as const) {
-    expect(await saveStep({ userId: u.id, role: "seeker", step, values: steps[step] })).toEqual({ ok: true });
-  }
-  await submitProfile({ userId: u.id, role: "seeker" });
-  return { u, steps };
-}
+const data = (form: object, extra: object = {}) => ({ ...form, ...extra, consentedAt: new Date().toISOString() });
 
 describe("embedding documents", () => {
   it("are deterministic and exclude private and identifying data", () => {
-    const s = seekerSteps("SecretAlias99");
-    s.background.excludedCompanies = ["Initech Corp"];
-    (s.background as Record<string, unknown>).linkedinUrl = "https://www.linkedin.com/in/someone";
-    (s.basics as Record<string, unknown>).city = "Hometown";
-    const doc = buildNeedsDoc(s as unknown as SeekerProfileData);
-    expect(doc).toBe(buildNeedsDoc(s as unknown as SeekerProfileData));
-    for (const secret of ["SecretAlias99", "Initech", "linkedin", "Hometown", "Acme"]) expect(doc).not.toContain(secret);
-    expect(doc).toContain("Product manager");
-    expect(doc).toContain("1. Career switch planning");
+    const form = seekerForm({ alias: "SecretAlias99", query: "I want to move from engineering into product management." });
+    const doc = buildNeedsDoc(data(form) as unknown as SeekerProfileData);
+    expect(doc).toBe(buildNeedsDoc(data(form) as unknown as SeekerProfileData));
+    for (const secret of ["SecretAlias99", form.memberId]) expect(doc).not.toContain(secret);
+    expect(doc).toContain("Category: Career Stagnation");
+    expect(doc).toContain("product management");
 
-    const g = guideSteps("GuideAlias77");
-    const offers = buildOffersDoc(g as unknown as GuideProfileData);
-    for (const secret of ["GuideAlias77", "Acme", "Weekday evenings", "9876"]) expect(offers).not.toContain(secret);
-    expect(offers).toContain("Career switch planning (expert)");
+    const g = guideForm({ alias: "GuideAlias77" });
+    const offers = buildOffersDoc(data(g) as unknown as GuideProfileData);
+    for (const secret of ["GuideAlias77", g.memberId, "9876"]) expect(offers).not.toContain(secret);
+    expect(offers).toContain("Categories: Career Stagnation, Uncertainty");
   });
 });
 
@@ -58,14 +46,14 @@ describe("embed_profile", () => {
     await db().delete(jobs);
   });
 
-  it("is queued by profile submission, embedded by the worker, and skipped when unchanged", async () => {
-    const { u, steps } = await completedSeeker();
+  it("is queued by registration, embedded by the worker, and skipped when unchanged", async () => {
+    const { user: u, form } = await makeSeeker();
     const queued = await db().select().from(jobs);
     expect(queued.some((j) => j.type === "embed_profile" && j.payload.userId === u.id)).toBe(true);
 
     await processJobs({ maxMs: 20_000 });
     const [row] = await db().select().from(profileEmbeddings).where(eq(profileEmbeddings.userId, u.id));
-    expect(row).toMatchObject({ kind: "needs", model: "mock-hash-embedding", dimension: 1536, docTemplateVersion: 1, profileVersion: 1 });
+    expect(row).toMatchObject({ kind: "needs", model: "mock-hash-embedding", dimension: 1536, docTemplateVersion: 2, profileVersion: 1 });
     expect(row!.embedding).toHaveLength(1536);
 
     // Same document: no new vector, so updatedAt is untouched.
@@ -75,7 +63,7 @@ describe("embed_profile", () => {
     expect(again!.updatedAt.getTime()).toBe(row!.updatedAt.getTime());
 
     // Changing matching-relevant text queues a job and replaces the vector.
-    await saveStep({ userId: u.id, role: "seeker", step: "goals", values: { ...steps.goals, challenge: steps.goals.challenge + " I also need help with salary negotiation." } });
+    await saveProfile({ userId: u.id, role: "seeker", values: { ...form, query: form.query + " I also need help with salary negotiation." } });
     await processJobs({ maxMs: 20_000 });
     const [changed] = await db().select().from(profileEmbeddings).where(eq(profileEmbeddings.userId, u.id));
     expect(changed!.docHash).not.toBe(row!.docHash);
@@ -83,11 +71,7 @@ describe("embed_profile", () => {
   });
 
   it("embeds Guides as offers", async () => {
-    const u = await createUser("guide");
-    const s = guideSteps();
-    for (const step of ["basics", "background", "expertise"] as const) await saveStep({ userId: u.id, role: "guide", step, values: s[step] });
-    await saveStep({ userId: u.id, role: "guide", step: "availability", values: s.availability, phone: "+919876543210" });
-    await submitProfile({ userId: u.id, role: "guide" });
+    const { user: u } = await makeGuide();
     await processJobs({ maxMs: 20_000 });
     const [row] = await db().select().from(profileEmbeddings).where(eq(profileEmbeddings.userId, u.id));
     expect(row?.kind).toBe("offers");

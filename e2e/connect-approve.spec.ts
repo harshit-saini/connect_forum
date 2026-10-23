@@ -1,6 +1,6 @@
 import pg from "pg";
 import { expect, test } from "./fixtures";
-import { signIn } from "./helpers";
+import { openFinder, signIn } from "./helpers";
 
 const SEEKER = "seed-seeker-1@example.com";
 const conn = () => new pg.Client({ connectionString: process.env.DATABASE_URL ?? "postgres://cf:cf@localhost:5432/connect_forum" });
@@ -26,6 +26,7 @@ test.beforeAll(async () => {
 test("request, review link, approve, and the seeker sees it approved", async ({ page, browser }) => {
   const startedAt = new Date();
   await signIn(page, SEEKER);
+  await openFinder(page);
   await page.getByRole("button", { name: "Find guides" }).click();
   const first = page.getByRole("listitem").filter({ hasText: "Why this Guide" }).first();
   await expect(first).toBeVisible({ timeout: 60_000 });
@@ -90,7 +91,6 @@ test("request, review link, approve, and the seeker sees it approved", async ({ 
   const res = await reveal;
   expect(res.headers()["cache-control"]).toMatch(/no-store/);
   await expect(page.getByTestId("revealed-number")).toHaveText(/^\+9190000000\d\d$/);
-  await expect(page.getByText(/Best time: Weekday evenings/)).toBeVisible();
   await page.getByRole("button", { name: "Hide" }).click();
   await expect(page.getByTestId("revealed-number")).toHaveCount(0);
 

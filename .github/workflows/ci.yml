@@ -56,6 +56,9 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm db:migrate
       - run: pnpm seed
+        env:
+          GUIDE_MEMBER_IDS: SEED-GUIDE-1,SEED-GUIDE-2,SEED-GUIDE-3,SEED-GUIDE-4,SEED-GUIDE-5,SEED-GUIDE-6,SEED-GUIDE-7,SEED-GUIDE-8,SEED-GUIDE-9,SEED-GUIDE-10,SEED-GUIDE-11,SEED-GUIDE-12
+          SEEKER_MEMBER_IDS: SEED-SEEKER-1,SEED-SEEKER-2,SEED-SEEKER-3,SEED-SEEKER-4,SEED-SEEKER-5,SEED-SEEKER-6
       - run: pnpm test:e2e
         env: { CI: "true" }
       - uses: actions/upload-artifact@v4

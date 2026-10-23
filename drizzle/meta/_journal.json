@@ -50,6 +50,13 @@
       "when": 1792132406449,
       "tag": "0006_mushy_hiroim",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792753471710,
+      "tag": "0007_pilot_simple_profile",
+      "breakpoints": true
     }
   ]
 }

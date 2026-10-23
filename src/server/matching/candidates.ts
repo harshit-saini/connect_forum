@@ -13,7 +13,7 @@ export type SeekerContext = {
   data: SeekerProfileData;
   facts: SeekerFacts;
   /** Hard-filter inputs (private; never leave the server or reach the AI). */
-  filters: { languages: string[]; excludedCompanies: string[]; topHelp: string[]; minGuideYears: number; mustShareLanguage: boolean };
+  filters: { category: string; languages: string[]; minGuideYears: number };
   embedding: number[] | null;
 };
 
@@ -29,7 +29,7 @@ const textArray = (items: string[]): SQL => (items.length ? sql`array[${sql.join
 
 export async function loadSeekerContext(userId: string, useVectors: boolean): Promise<SeekerContext | null> {
   const [p] = await db().select().from(seekerProfiles).where(eq(seekerProfiles.userId, userId)).limit(1);
-  if (!p?.profileCompletedAt || p.deletedAt) return null;
+  if (!p?.profileCompletedAt || !p.memberId || p.deletedAt) return null;
   const data = p.data as unknown as SeekerProfileData;
   let embedding: number[] | null = null;
   if (useVectors) {
@@ -40,28 +40,8 @@ export async function loadSeekerContext(userId: string, useVectors: boolean): Pr
     userId,
     profileVersion: p.profileVersion,
     data,
-    facts: {
-      careerStage: data.goals.careerStage,
-      primaryGoal: data.goals.primaryGoal,
-      helpNeeded: data.goals.helpNeeded,
-      targetFunction: data.goals.targetFunction,
-      targetIndustries: data.goals.targetIndustries,
-      seniority: data.background.seniority,
-      similarTransition: data.preferences.similarTransition,
-      engagementStyle: data.preferences.engagementStyle,
-      mode: data.preferences.mode,
-      availability: data.preferences.availability,
-      timezone: data.basics.timezone,
-      preferredFunctions: data.preferences.preferredGuideFunctions ?? [],
-      preferredIndustries: data.preferences.preferredGuideIndustries ?? [],
-    },
-    filters: {
-      languages: p.languages,
-      excludedCompanies: p.excludedCompanies,
-      topHelp: data.goals.helpNeeded.slice(0, 3),
-      minGuideYears: Math.max(env().MIN_GUIDE_EXPERIENCE_YEARS, p.minGuideExperience),
-      mustShareLanguage: p.mustShareLanguage,
-    },
+    facts: { category: data.category, languages: p.languages },
+    filters: { category: data.category, languages: p.languages, minGuideYears: env().MIN_GUIDE_EXPERIENCE_YEARS },
     embedding,
   };
 }
@@ -70,24 +50,16 @@ type Row = {
   user_id: string;
   data: GuideProfileData;
   total_years: number;
-  seniority: string;
-  current_function: string | null;
-  primary_functions: string[];
-  primary_industries: string[];
-  stages_best_at: string[];
-  transitions: string[];
+  categories: string[];
+  languages: string[];
   max_new_seekers_per_month: number;
-  availability: string[];
-  timezone: string;
-  mode: string;
   similarity: number | null;
 };
 
 /**
- * Hard filters (HF), all in SQL: verified and active account, complete profile, not paused,
- * experience thresholds, remaining monthly capacity, language overlap (when required), no shared
- * excluded company, the Guide's "won't help with" versus the Seeker's top needs, no block or report
- * between the pair, and no pending or approved connection for the pair.
+ * Hard filters (HF), all in SQL: verified and active account, registered profile (member ID on file), not
+ * paused, experience threshold, remaining monthly capacity, the Guide covers the Seeker's category, a shared
+ * language, no block or report between the pair, and no pending or approved connection for the pair.
  * With vectors, results are ordered by cosine similarity to the Seeker's needs vector.
  */
 export async function findCandidates(s: SeekerContext): Promise<Candidate[]> {
@@ -97,22 +69,20 @@ export async function findCandidates(s: SeekerContext): Promise<Candidate[]> {
   const order = vec ? sql`e.embedding <=> ${vec} nulls last` : sql`g.total_years desc`;
 
   const res = await db().execute(sql`
-    select g.user_id, g.data, g.total_years, g.seniority, g.current_function, g.primary_functions, g.primary_industries,
-           g.stages_best_at, g.transitions, g.max_new_seekers_per_month, g.availability, g.timezone, g.mode,
+    select g.user_id, g.data, g.total_years, g.categories, g.languages, g.max_new_seekers_per_month,
            ${simCol} as similarity
     from guide_profiles g
     join users u on u.id = g.user_id
     left join profile_embeddings e on e.user_id = g.user_id and e.kind = 'offers'
-    where g.profile_completed_at is not null and g.deleted_at is null
+    where g.profile_completed_at is not null and g.member_id is not null and g.deleted_at is null
       and u.suspended_at is null and u.deleted_at is null and u.email_verified
       and g.user_id <> ${s.userId}
       and g.matching_paused = false
       and g.total_years >= ${f.minGuideYears}
+      and ${f.category} = any(g.categories)
+      and g.languages && ${textArray(f.languages)}
       and (select count(*) from connection_requests cr
            where cr.guide_id = g.user_id and cr.status = 'approved' and cr.approved_at >= date_trunc('month', now())) < g.max_new_seekers_per_month
-      and (${f.mustShareLanguage} = false or g.languages && ${textArray(f.languages)})
-      and not (g.excluded_companies && ${textArray(f.excludedCompanies)})
-      and not (g.wont_help_types && ${textArray(f.topHelp)})
       and not exists (select 1 from blocks b where (b.blocker_id = ${s.userId} and b.blocked_id = g.user_id) or (b.blocker_id = g.user_id and b.blocked_id = ${s.userId}))
       and not exists (select 1 from reports r where (r.reporter_id = ${s.userId} and r.reported_id = g.user_id) or (r.reporter_id = g.user_id and r.reported_id = ${s.userId}))
       and not exists (select 1 from connection_requests cr where cr.seeker_id = ${s.userId} and cr.guide_id = g.user_id and cr.status in ('pending', 'approved'))
@@ -124,18 +94,10 @@ export async function findCandidates(s: SeekerContext): Promise<Candidate[]> {
     data: r.data,
     similarity: r.similarity === null ? null : Number(r.similarity),
     facts: {
-      primaryFunctions: r.primary_functions,
-      primaryIndustries: r.primary_industries,
-      currentFunction: r.current_function,
-      help: r.data.expertise.help,
-      stagesBestAt: r.stages_best_at,
-      transitions: r.transitions,
-      seniority: r.seniority,
+      categories: r.categories,
+      languages: r.languages,
       totalYears: r.total_years,
-      mode: r.mode,
       maxNewSeekersPerMonth: r.max_new_seekers_per_month,
-      availability: r.availability,
-      timezone: r.timezone,
     },
   }));
 }

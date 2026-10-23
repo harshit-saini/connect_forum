@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "@/server/db/client";
 import { auditLog, matchRuns, matches, reports, sessions, users } from "@/server/db/schema";
+import * as adminService from "@/server/admin/service";
 import { listAudit, listReports, listUsers, reviewReport, suspendUser, unsuspendUser } from "@/server/admin/service";
 import { createRequest } from "@/server/connections/service";
 import { findCandidates, loadSeekerContext } from "@/server/matching/candidates";
@@ -115,6 +116,46 @@ describe("admin actions are admin-only", () => {
     const bad = new FormData();
     bad.set("userId", "not-a-uuid");
     await expect(suspendUserAction(bad)).rejects.toThrow();
+    viewerRef.current = null;
+  });
+});
+
+describe("guide invitations", () => {
+  it("parses a pasted list into unique valid addresses and reports the rest", () => {
+    const { parseInviteEmails } = adminService;
+    expect(parseInviteEmails("A@x.com, a@x.com;b@x.com\n not-an-email  c@y.org")).toEqual({ valid: ["a@x.com", "b@x.com", "c@y.org"], invalid: ["not-an-email"] });
+  });
+
+  it("emails the registration link, and audits only counts", async () => {
+    const { inviteGuides } = await import("@/server/admin/service");
+    const admin = await createUser();
+    const to = `invitee-${randomUUID()}@example.com`;
+    const res = await inviteGuides(admin.id, `${to}, nonsense`);
+    expect(res).toEqual({ ok: true, sent: 1, failed: 0, invalid: ["nonsense"] });
+    const { devOutbox } = await import("@/server/db/schema");
+    const [mail] = await db().select().from(devOutbox).where(eq(devOutbox.to, to));
+    expect(mail!.subject).toMatch(/invited/i);
+    expect(mail!.text).toContain("/join/guide");
+    const [entry] = await db().select().from(auditLog).where(and(eq(auditLog.action, "guide.invited"), eq(auditLog.actorId, admin.id)));
+    expect(entry!.metadata).toEqual({ sent: 1, failed: 0 });
+    expect(JSON.stringify(entry)).not.toContain(to);
+  });
+
+  it("rejects empty and oversized batches", async () => {
+    const { inviteGuides, MAX_INVITES_PER_SUBMISSION } = await import("@/server/admin/service");
+    const admin = await createUser();
+    expect(await inviteGuides(admin.id, "  ")).toMatchObject({ ok: false });
+    expect(await inviteGuides(admin.id, "nonsense only")).toMatchObject({ ok: false });
+    const many = Array.from({ length: MAX_INVITES_PER_SUBMISSION + 1 }, (_, i) => `x${i}@example.com`).join(",");
+    expect(await inviteGuides(admin.id, many)).toMatchObject({ ok: false });
+  });
+
+  it("is admin-only", async () => {
+    const { inviteGuidesAction } = await import("@/server/actions/admin");
+    viewerRef.current = { id: randomUUID(), isAdmin: false };
+    const fd = new FormData();
+    fd.set("emails", "a@example.com");
+    await expect(inviteGuidesAction(null, fd)).rejects.toThrow("NEXT_REDIRECT");
     viewerRef.current = null;
   });
 });

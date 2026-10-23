@@ -34,7 +34,7 @@ export default async function ConnectionPage({ params }: { params: Promise<{ id:
         <h1 className="text-3xl font-semibold">{row.alias}</h1>
         <Link href="/seeker/connections" className="text-sm underline">All requests</Link>
       </div>
-      <p className="text-muted">{guide.title} · {guide.years} yrs · {guide.seniority}</p>
+      <p className="text-muted">{guide.title} · {guide.years} yrs</p>
 
       {row.req.status === "approved" ? (
         <RevealNumber connectionId={row.req.id} />
@@ -56,8 +56,8 @@ export default async function ConnectionPage({ params }: { params: Promise<{ id:
 
       <Card className="space-y-2 text-sm">
         <h2 className="font-semibold">About this Guide</h2>
-        <p className="whitespace-pre-line">{guide.summary}</p>
-        <p className="text-muted">Can help with: {guide.help.map((h) => h.type).join(", ")}</p>
+        <p className="whitespace-pre-line">{guide.about}</p>
+        <p className="text-muted">Can help with: {guide.categories.join(", ")}</p>
       </Card>
       <SeekerSafety target={{ kind: "connection", id: row.req.id }} who={row.alias} />
     </div>

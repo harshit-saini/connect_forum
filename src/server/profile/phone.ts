@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { parsePhoneNumberFromString } from "libphonenumber-js/min";
 import type { Db } from "@/server/db/client";
 import { phoneVault } from "@/server/db/schema";
-import { E164 } from "@/schemas/guide";
+import { E164 } from "@/schemas/profile";
 import { seal } from "@/server/vault";
 
 export function isAcceptablePhone(input: string): boolean {

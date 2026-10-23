@@ -50,11 +50,11 @@ describe("data export", () => {
     expect(json).not.toContain(p.seeker.user.email); // the counterpart's email is never exported
     expect(json).not.toContain("Very helpful indeed"); // a Guide never sees individual reviews, not even in an export
     expect(guideExport!.ratingsReceived).toEqual({ count: 1, average: null, needed: 2 });
-    expect(guideExport!.requests[0]).toMatchObject({ direction: "received", with: p.seeker.steps.basics.alias, status: "approved" });
+    expect(guideExport!.requests[0]).toMatchObject({ direction: "received", with: p.seeker.form.alias, status: "approved" });
     expect(json).not.toContain("Hello there"); // the Seeker's note to the Guide stays with the Seeker's data
 
     const seekerExport = await buildExport(p.seeker.user.id);
-    expect(seekerExport!.ratingsGiven[0]).toMatchObject({ score: 5, review: "Very helpful indeed", guideAlias: p.guide.steps.basics.alias });
+    expect(seekerExport!.ratingsGiven[0]).toMatchObject({ score: 5, review: "Very helpful indeed", guideAlias: p.guide.form.alias });
     expect(seekerExport!.requests[0]).toMatchObject({ direction: "sent", note: "Hello there" });
     expect(seekerExport!.matches).toHaveLength(1);
     expect(JSON.stringify(seekerExport)).not.toContain(PHONE_DIGITS);

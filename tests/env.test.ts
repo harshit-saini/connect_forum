@@ -34,6 +34,8 @@ describe("parseEnv", () => {
       ENABLE_EMBEDDINGS: "false",
       RESEND_API_KEY: "k",
       RESEND_WEBHOOK_SECRET: "s",
+      GUIDE_MEMBER_IDS: "G-1",
+      SEEKER_MEMBER_IDS: "S-1",
       FOUNDRY_ENDPOINT: "https://example.services.ai.azure.com",
       FOUNDRY_API_KEY: "k",
       LLM_DEPLOYMENT: "claude-sonnet",
@@ -47,10 +49,30 @@ describe("parseEnv", () => {
 });
 
 describe("LLM_PROVIDER", () => {
-  const live = { ...base, MOCK_AI: "false", ENABLE_EMBEDDINGS: "false", RESEND_API_KEY: "k", RESEND_WEBHOOK_SECRET: "s", FOUNDRY_ENDPOINT: "https://x.openai.azure.com", FOUNDRY_API_KEY: "k", LLM_DEPLOYMENT: "gpt" };
+  const live = { ...base, MOCK_AI: "false", ENABLE_EMBEDDINGS: "false", RESEND_API_KEY: "k", RESEND_WEBHOOK_SECRET: "s", GUIDE_MEMBER_IDS: "G-1", SEEKER_MEMBER_IDS: "S-1", FOUNDRY_ENDPOINT: "https://x.openai.azure.com", FOUNDRY_API_KEY: "k", LLM_DEPLOYMENT: "gpt" };
   it("defaults to anthropic and accepts openai; anything else is rejected", () => {
     expect(parseEnv(live as never).LLM_PROVIDER).toBe("anthropic");
     expect(parseEnv({ ...live, LLM_PROVIDER: "openai" } as never).LLM_PROVIDER).toBe("openai");
     expect(() => parseEnv({ ...live, LLM_PROVIDER: "gemini" } as never)).toThrow(/LLM_PROVIDER/);
+  });
+});
+
+describe("member ID allow-lists", () => {
+  it("parses, normalises and de-duplicates comma, semicolon and newline separated lists", () => {
+    const env = parseEnv({ ...base, MOCK_AI: "true", GUIDE_MEMBER_IDS: "g-1, G-2;g-1\n  g 33 ", SEEKER_MEMBER_IDS: "s-11" } as never);
+    expect(env.GUIDE_MEMBER_IDS).toEqual(["G-1", "G-2", "G33"]);
+    expect(env.SEEKER_MEMBER_IDS).toEqual(["S-11"]);
+  });
+  it("defaults to empty (nobody can register) in mock mode", () => {
+    const env = parseEnv({ ...base, MOCK_AI: "true" } as never);
+    expect(env.GUIDE_MEMBER_IDS).toEqual([]);
+  });
+  it("is required when not in mock mode, so the check can never be left open by accident", () => {
+    const live = { ...base, MOCK_AI: "false", FOUNDRY_ENDPOINT: "https://x.example.com", FOUNDRY_API_KEY: "k", LLM_DEPLOYMENT: "m", EMBEDDING_DEPLOYMENT: "e", RESEND_API_KEY: "r", RESEND_WEBHOOK_SECRET: "whsec_x", FROM_EMAIL: "a@b.com" };
+    expect(() => parseEnv(live as never)).toThrow(/GUIDE_MEMBER_IDS/);
+    expect(() => parseEnv({ ...live, GUIDE_MEMBER_IDS: "G-1", SEEKER_MEMBER_IDS: "S-1" } as never)).not.toThrow(/MEMBER_IDS/);
+  });
+  it("rejects an entry that cannot be a member ID", () => {
+    expect(() => parseEnv({ ...base, MOCK_AI: "true", GUIDE_MEMBER_IDS: "ok-1,bad id!" } as never)).toThrow(/member ID/);
   });
 });

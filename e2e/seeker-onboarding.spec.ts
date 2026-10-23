@@ -1,79 +1,60 @@
-import { type Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
-import { signIn } from "./helpers";
+import { E2E_IDS, freeMemberIds, signIn, sql } from "./helpers";
 
-async function addTag(page: Page, label: string, text: string) {
-  const box = page.getByRole("textbox", { name: label, exact: true });
-  await box.fill(text);
-  await box.press("Enter");
-}
+test.beforeAll(freeMemberIds);
+test.afterAll(freeMemberIds);
 
-test("a seeker completes the wizard with autosave and resume, then lands on the dashboard", async ({ page }) => {
+test("a seeker registers on one page: the member ID is checked, contact details are refused, then the FAQs come first", async ({ page }) => {
   const email = `seeker-${Date.now()}@example.com`;
   await signIn(page, email);
-  await page.getByRole("button", { name: "Continue as Seeker" }).click();
-  await expect(page).toHaveURL(/\/onboarding/);
+  await page.goto("/join/seeker");
+  await expect(page.getByRole("heading", { name: "Ask for guidance" })).toBeVisible();
 
-  // Step 1: basics. Contact details in free text are rejected inline.
+  const question = "I have been in the same role for five years and want to move into product management but do not know where to start.";
   await page.getByRole("button", { name: "Suggest" }).click();
   await expect(page.getByLabel("Alias")).not.toHaveValue("");
-  await page.getByLabel("City").fill("Pune");
-  await addTag(page, "Languages", "English");
-  await page.getByLabel(/Terms of use/).check();
-  await page.getByLabel(/Privacy policy/).check();
-  await page.getByLabel(/processed by AI/).check();
-  await page.getByRole("button", { name: "Save and continue" }).click();
+  await page.getByRole("radio", { name: /Career Stagnation/ }).check();
+  await page.getByLabel("Years of work experience").fill("5");
+  await page.getByLabel(/I agree to the/).check();
 
-  // Step 2: background
-  await expect(page.getByRole("heading", { name: "Professional background" })).toBeVisible();
-  await page.getByLabel("Current status").selectOption("student");
-  await page.getByLabel("Current job title").fill("Student");
-  await page.getByLabel("Current industry").selectOption("it_software");
-  await page.getByLabel("Current job function").selectOption("software_engineering");
-  await page.getByLabel("Total years of experience").fill("1");
-  await page.getByLabel("Seniority level").selectOption("entry");
-  for (const s of ["Python", "SQL", "Excel"]) await addTag(page, "Skills", s);
-  await page.getByRole("button", { name: "Save and continue" }).click();
+  // Hard member-ID check: an unknown ID is refused on the server.
+  await page.getByLabel("Member ID").fill("NOT-A-MEMBER");
+  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("button", { name: "Join", exact: true }).click();
+  await expect(page.getByText("We couldn't find that member ID. Check it and try again.")).toBeVisible();
+  await expect(page).toHaveURL(/\/join\/seeker/);
 
-  // Step 3: goals. Try a bad challenge first.
-  await expect(page.getByRole("heading", { name: "Goals and needs" })).toBeVisible();
-  await page.getByRole("radio", { name: /Early career/ }).check();
-  await page.getByRole("radio", { name: /Switch career/ }).check();
-  await page.getByLabel("Target role(s) 1").fill("Product manager");
-  await page.getByRole("checkbox", { name: "Fintech" }).check();
-  await page.getByLabel("Target function").selectOption("product_management");
-  await page.getByLabel("Timeline", { exact: true }).selectOption("6_months");
-  await page.getByLabel("Job search status").selectOption("preparing");
-  await page.getByRole("checkbox", { name: "Career switch planning" }).check();
-  await page.getByRole("checkbox", { name: "Interview preparation" }).check();
-  const challenge = "I am an engineer who wants to move into product management but I do not know how to show relevant experience.";
-  await page.getByLabel("Biggest challenge right now").fill(challenge + " Email me at me@example.com");
-  await page.getByRole("button", { name: "Save and continue" }).click();
+  // A Guide's ID is not valid for a Seeker.
+  await page.getByLabel("Member ID").fill(E2E_IDS.guide[0]!);
+  await page.getByRole("button", { name: "Join", exact: true }).click();
+  await expect(page.getByText("We couldn't find that member ID. Check it and try again.")).toBeVisible();
+
+  // Contact details in the question are rejected inline.
+  await page.getByLabel("Member ID").fill(E2E_IDS.seeker[0]!.toLowerCase());
+  await page.getByLabel("Your question").fill(question + " Email me at me@example.com");
+  await page.getByRole("button", { name: "Join", exact: true }).click();
   await expect(page.getByText("Please remove contact details. Contact details are only shared after approval.")).toBeVisible();
-  await page.getByLabel("Biggest challenge right now").fill(challenge);
 
-  // Autosave then reload: the draft must survive.
-  await expect(page.getByText("Draft saved")).toBeVisible();
-  await page.reload();
-  await expect(page.getByLabel("Biggest challenge right now")).toHaveValue(challenge);
-  await page.getByRole("button", { name: "Save and continue" }).click();
-
-  // Step 4: preferences
-  await expect(page.getByRole("heading", { name: "Preferences" })).toBeVisible();
-  await page.getByRole("radio", { name: /A few sessions/ }).check();
-  await page.getByRole("radio", { name: "Video call" }).check();
-  await page.getByRole("checkbox", { name: "Tue Evening" }).click();
-  await page.getByRole("checkbox", { name: "Sat Morning" }).click();
-  await page.getByRole("button", { name: "Save and continue" }).click();
-
-  // Step 5: review and submit
-  await expect(page.getByRole("heading", { name: "What others will see" })).toBeVisible();
-  await expect(page.getByText("Product manager").first()).toBeVisible();
-  await page.getByRole("button", { name: "Submit profile" }).click();
+  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("button", { name: "Join", exact: true }).click();
   await expect(page).toHaveURL(/\/seeker$/);
   await expect(page.getByRole("heading", { name: "Seeker dashboard" })).toBeVisible();
 
-  // Completed profile is editable.
-  await page.goto("/profile");
-  await expect(page.getByRole("heading", { name: "My profile" })).toBeVisible();
+  // FAQs come first: answered questions never reach a Guide.
+  await expect(page.getByRole("heading", { name: "Quick answers first" })).toBeVisible();
+  await expect(page.getByText("How do I know if I am really stuck")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Find guides" })).toHaveCount(0);
+  await page.getByRole("button", { name: "This answered my question" }).click();
+  await expect(page.getByRole("heading", { name: "Glad that helped" })).toBeVisible();
+  await expect.poll(async () => (await sql("select outcome from faq_events f join users u on u.id = f.user_id where u.email = $1", [email])).map((r) => (r as { outcome: string }).outcome)).toEqual(["resolved"]);
+
+  // The member ID is saved normalised, and the profile page shows it only to the member; it can't be changed.
+  const rows = await sql<{ member_id: string; category: string }>("select member_id, category from seeker_profiles p join users u on u.id = p.user_id where u.email = $1", [email]);
+  expect(rows[0]).toEqual({ member_id: "E2E-SEEKER-1", category: "career_stagnation" });
+  await page.goto("/profile/edit");
+  await expect(page.getByLabel("Member ID")).toHaveValue("E2E-SEEKER-1");
+  await expect(page.getByLabel("Member ID")).toHaveAttribute("readonly", "");
+  // The form is also bound to the same member from /join: a registered Seeker is sent to the dashboard.
+  await page.goto("/join/seeker");
+  await expect(page).toHaveURL(/\/seeker$/);
 });

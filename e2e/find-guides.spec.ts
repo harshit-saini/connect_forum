@@ -1,6 +1,6 @@
 import pg from "pg";
 import { expect, test } from "./fixtures";
-import { signIn } from "./helpers";
+import { openFinder, signIn } from "./helpers";
 
 const SEEKER = "seed-seeker-1@example.com";
 
@@ -18,6 +18,8 @@ test.beforeAll(async () => {
 test("a seeker finds guides and sees ranked matches with reasons", async ({ page }) => {
   await signIn(page, SEEKER);
   await expect(page).toHaveURL(/\/seeker$/);
+  await expect(page.getByRole("heading", { name: "Quick answers first" })).toBeVisible();
+  await openFinder(page);
   await expect(page.getByRole("heading", { name: "Ready when you are" })).toBeVisible();
 
   await page.getByRole("button", { name: "Find guides" }).click();
@@ -26,7 +28,6 @@ test("a seeker finds guides and sees ranked matches with reasons", async ({ page
   await expect(page.getByRole("progressbar", { name: "Search progress" })).toHaveCount(0, { timeout: 60_000 });
   const cards = page.getByRole("listitem").filter({ hasText: "Why this Guide" });
   await expect(cards).toHaveCount(5);
-  await expect(cards.first()).toContainText("Director of Product");
   await expect(page.getByText("(refining…)")).toHaveCount(0);
 
   // Reloading shows the saved results; searching again with nothing new says so.

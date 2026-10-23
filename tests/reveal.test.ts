@@ -41,10 +41,10 @@ async function approvedPair() {
 }
 
 describe("revealNumber", () => {
-  it("returns the number, contact preference and best time to the approved seeker, and audits it", async () => {
+  it("returns the number to the approved seeker, and audits it", async () => {
     const p = await approvedPair();
     const res = await revealNumber({ seekerId: p.seeker.user.id, connectionId: p.requestId });
-    expect(res).toEqual({ ok: true, phone: PHONE, contactPreference: "call", bestTime: "Weekday evenings" });
+    expect(res).toEqual({ ok: true, phone: PHONE });
     const rows = await db().select().from(auditLog).where(and(eq(auditLog.action, "phone.revealed"), eq(auditLog.subjectId, p.requestId)));
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ actorId: p.seeker.user.id, targetId: p.guide.user.id });

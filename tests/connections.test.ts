@@ -71,7 +71,8 @@ describe("creating a request", () => {
     const [mail] = await emailsTo(p.guide.user.email);
     const token = /\/review\/([A-Za-z0-9_-]{43})/.exec(mail!.text)![1]!;
     expect(hashToken(token)).toBe(row!.tokenHash);
-    expect(mail!.text).toMatch(/Career stage/);
+    expect(mail!.text).toMatch(/Category: Career Stagnation/);
+    expect(mail!.text).toContain(p.seeker.form.query);
     for (const secret of [p.seeker.user.email, "9876543210"]) expect(mail!.text).not.toContain(secret);
 
     // The raw token no longer exists anywhere in the job row once the e-mail is out.
@@ -176,7 +177,7 @@ describe("reviewing and deciding", () => {
     await processJobs({ maxMs: 20_000 });
     const mail = (await emailsTo(p.seeker.user.email)).find((m) => m.subject.includes("update on your request"))!;
     expect(mail.text).toMatch(/other matches/i);
-    expect(mail.text).not.toContain(p.guide.steps.basics.alias);
+    expect(mail.text).not.toContain(p.guide.form.alias);
   });
 
   it("lets exactly one of several simultaneous decisions win", async () => {
@@ -207,7 +208,7 @@ describe("reviewing and deciding", () => {
     await db().update(users).set({ suspendedAt: new Date() }).where(eq(users.id, s.guide.user.id));
     expect(await decide(t1, "approve")).toMatchObject({ ok: false, code: "unavailable" });
 
-    const c = await pair({ mutateGuide: (g) => (g.availability.maxNewSeekersPerMonth = 1) });
+    const c = await pair({ mutateGuide: { maxNewSeekersPerMonth: 1 } });
     const { token: t2 } = await requestWithToken(c);
     const second = await makeSeeker();
     await db().insert(connectionRequests).values({ seekerId: second.user.id, guideId: c.guide.user.id, status: "approved", approvedAt: new Date(), tokenHash: generateToken(), expiresAt: new Date(Date.now() + 1e9) });

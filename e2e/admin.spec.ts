@@ -15,10 +15,6 @@ test("a non-admin cannot reach the admin area", async ({ page }) => {
 
 test("an admin can find a user, suspend and unsuspend them, and see it in the audit log", async ({ page }) => {
   await signIn(page, "admin@example.com");
-  // A brand-new admin has to pick a role once; an existing one is redirected away from this page.
-  await page.goto("/choose-role");
-  const picked = await page.getByRole("button", { name: "Continue as Seeker" }).click({ timeout: 4000 }).then(() => true, () => false);
-  if (picked) await page.waitForURL(/onboarding/); // the role is saved by a server action: let it finish
   await page.goto("/admin");
   await expect(page.getByRole("heading", { name: "Admin" })).toBeVisible();
 
@@ -40,4 +36,18 @@ test("an admin can find a user, suspend and unsuspend them, and see it in the au
   await page.goto("/admin/users?q=seed-guide-12");
   await page.getByRole("row").filter({ hasText: TARGET }).getByRole("button", { name: "Unsuspend" }).click();
   await expect(page.getByRole("row").filter({ hasText: TARGET }).getByText("Active")).toBeVisible();
+});
+
+test("an admin can send Guide invitations and sees the FAQ self-service numbers", async ({ page }) => {
+  await signIn(page, "admin@example.com");
+  await page.goto("/admin");
+  await expect(page.getByRole("heading", { name: "FAQ self-service" })).toBeVisible();
+  await page.getByRole("link", { name: "Invite Guides by email" }).click();
+  const to = `invitee-${Date.now()}@example.com`;
+  await page.getByLabel("Email addresses").fill(`${to}, not-an-email`);
+  await page.getByRole("button", { name: "Send invitations" }).click();
+  await expect(page.getByText(/Sent 1 invitation\./)).toBeVisible();
+  await expect(page.getByText(/Skipped invalid: not-an-email/)).toBeVisible();
+  const rows = await sql<{ text: string }>("select text from dev_outbox where \"to\" = $1", [to]);
+  expect(rows[0]!.text).toContain("/join/guide");
 });

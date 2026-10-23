@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 // Optimistic checks only (cookie present). Real authorization and the onboarding gate run in server
 // code (src/server/viewer.ts), which reads the database.
-const PUBLIC = [/^\/$/, /^\/sign-in/, /^\/terms/, /^\/privacy/, /^\/offline/, /^\/review\//];
+const PUBLIC = [/^\/$/, /^\/sign-in/, /^\/join$/, /^\/faq/, /^\/terms/, /^\/privacy/, /^\/offline/, /^\/review\//];
 
 /** Per-request nonce CSP: scripts and styles run only when they carry this request's nonce. */
 function contentSecurityPolicy(nonce: string): string {

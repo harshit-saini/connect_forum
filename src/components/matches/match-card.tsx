@@ -29,7 +29,7 @@ export function MatchCardView({ match, action }: { match: Match; action?: React.
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="text-lg font-semibold">{match.alias}</h3>
-          <p className="text-sm text-muted">{guide.title} · {guide.years} yrs · {guide.seniority}</p>
+          <p className="text-sm text-muted">{guide.title} · {guide.years} yrs</p>
         </div>
         <div className="text-right">
           <p className="text-2xl font-semibold text-primary" aria-label={`Match score ${match.score} out of 100`}>{match.score}</p>
@@ -39,14 +39,12 @@ export function MatchCardView({ match, action }: { match: Match; action?: React.
 
       <p className="rounded-lg bg-accent p-3 text-sm"><span className="font-medium">Why this Guide: </span>{match.explanation}{!match.final && <span className="ml-1 text-muted">(refining…)</span>}</p>
 
-      <Chips label="Can help with" items={guide.help.map((h) => `${h.type} · ${h.level}`)} />
-      <Chips label="Focus" items={[...guide.functions, ...guide.industries]} />
-      {guide.transitions.length > 0 && <Chips label="Transitions made" items={guide.transitions} />}
+      <Chips label="Categories" items={guide.categories} />
+      <Chips label="Languages" items={guide.languages} />
 
       <details className="text-sm">
         <summary className="cursor-pointer font-medium text-primary">About this Guide</summary>
-        <p className="mt-2 whitespace-pre-line">{guide.summary}</p>
-        <p className="mt-2 text-muted">Hiring experience: {guide.hiring}</p>
+        <p className="mt-2 whitespace-pre-line">{guide.about}</p>
       </details>
 
       <div className="flex flex-wrap items-center justify-between gap-3">

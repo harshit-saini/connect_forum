@@ -2,24 +2,14 @@
 export const MATCHING = {
   /** Structured score components. They are re-normalised, so only their ratios matter. */
   structured: {
-    helpOverlap: 0.3,
-    functionIndustry: 0.2,
-    availability: 0.15,
-    seniority: 0.1,
-    transition: 0.1,
-    /** Used instead of `transition` when the Seeker asked for a similar transition. */
-    transitionWhenRequested: 0.2,
-    stageFit: 0.08,
-    engagementMode: 0.07,
+    /** Share of the Seeker's languages the Guide speaks. */
+    language: 0.35,
+    /** Years of experience, saturating at `experienceFullYears`. */
+    experience: 0.4,
+    /** A Guide who covers fewer categories counts as more focused. */
+    focus: 0.25,
   },
-  /** Weight of each Seeker help rank (position 1, 2, 3, then the rest). */
-  helpRankWeights: [1, 0.7, 0.5, 0.3],
-  helpLevelValue: { some: 0.5, solid: 0.8, expert: 1 },
-  /** A Guide's own top-3 areas count a little more than their lower-ranked ones. */
-  guideTopHelpBoost: 1,
-  guideLowerHelpFactor: 0.85,
-  /** Shared weekly hours (in UTC) at which availability overlap counts as full. */
-  availabilityFullOverlapHours: 4,
+  experienceFullYears: 15,
 
   /** Preliminary and no-LLM ranking: blend of structured and vector similarity. */
   preliminary: { structured: 0.6, vector: 0.4 },
@@ -46,5 +36,3 @@ export const MATCHING = {
 
   llm: { maxRetries: 3, timeoutMs: 45_000, maxOutputTokens: 1200 },
 } as const;
-
-export type HelpLevel = keyof typeof MATCHING.helpLevelValue;

@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { type Option, valuesOf } from "@/config/taxonomy";
-import { COUNTRY_CODES } from "@/lib/countries";
 import { screenText } from "@/lib/screening";
 
 export const enumOf = <T extends readonly Option[]>(list: T) => z.enum(valuesOf(list));
@@ -22,26 +21,7 @@ export function freeText(min: number, max: number) {
 
 export const optionalFreeText = (max: number) => freeText(1, max).optional();
 
-export const years = z.number({ error: "Enter a number" }).int("Whole numbers only").min(0).max(50);
-
-export const timezone = z.string().refine((tz) => {
-  try {
-    new Intl.DateTimeFormat("en", { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
-}, "Choose a valid timezone");
-
-export const country = z.string().refine((c) => COUNTRY_CODES.has(c), "Choose a country");
-
-/** Availability slot: `<day>.<part>`, e.g. "tue.evening". */
-export const SLOT = /^(mon|tue|wed|thu|fri|sat|sun)\.(morning|afternoon|evening|night)$/;
-export const availability = z
-  .array(z.string().regex(SLOT))
-  .min(2, "Pick at least 2 time slots")
-  .max(28)
-  .refine((a) => new Set(a).size === a.length, "Duplicate slots");
+export const years = z.number({ error: "Enter a number" }).int("Whole numbers only").min(0, "Enter a number from 0").max(50, "Enter a number up to 50");
 
 /** Turns "" into undefined (deeply) so blank optional form inputs pass `.optional()`. */
 export function normalizeEmpty<T>(value: T): T {

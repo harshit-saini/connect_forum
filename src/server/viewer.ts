@@ -30,7 +30,7 @@ export const getViewer = cache(async (): Promise<Viewer | null> => {
 
   const [roleRow] = await db().select().from(userRoles).where(eq(userRoles.userId, user.id)).limit(1);
   const role = roleRow?.role ?? null;
-  let profile: { profileCompletedAt: Date | null; profileVersion: number } | undefined;
+  let profile: { profileCompletedAt: Date | null; profileVersion: number; memberId: string | null } | undefined;
   if (role) {
     const table = role === "seeker" ? seekerProfiles : guideProfiles;
     [profile] = await db().select().from(table).where(eq(table.userId, user.id)).limit(1);
@@ -42,7 +42,8 @@ export const getViewer = cache(async (): Promise<Viewer | null> => {
     role,
     isAdmin: user.emailVerified && env().ADMIN_EMAILS.includes(user.email.toLowerCase()),
     suspended: Boolean(user.suspendedAt),
-    profileCompleted: Boolean(profile?.profileCompletedAt),
+    // Legacy (pre-pilot) profiles have no member ID: they must register again.
+    profileCompleted: Boolean(profile?.profileCompletedAt && profile.memberId),
     profileVersion: profile?.profileVersion ?? 0,
   };
 });
@@ -55,17 +56,17 @@ export async function requireViewer(): Promise<Viewer> {
   return v;
 }
 
-/** Requires a viewer who has picked a role. */
+/** Requires a viewer who has registered with a role (via /join/seeker or /join/guide). */
 export async function requireRole(): Promise<Viewer & { role: Role }> {
   const v = await requireViewer();
-  if (!v.role) redirect("/choose-role");
+  if (!v.role) redirect("/join");
   return v as Viewer & { role: Role };
 }
 
-/** The onboarding gate: everything outside /onboarding, /settings and sign-out needs a completed profile. */
+/** The registration gate: everything outside /join, /settings and sign-out needs a completed profile. */
 export async function requireCompletedProfile(): Promise<Viewer & { role: Role }> {
   const v = await requireRole();
-  if (!v.profileCompleted) redirect("/onboarding");
+  if (!v.profileCompleted) redirect(`/join/${v.role}`);
   return v;
 }
 
@@ -76,5 +77,5 @@ export async function requireAdmin(): Promise<Viewer> {
 }
 
 export function dashboardPath(role: Role | null) {
-  return role === "guide" ? "/guide" : role === "seeker" ? "/seeker" : "/choose-role";
+  return role === "guide" ? "/guide" : role === "seeker" ? "/seeker" : "/join";
 }

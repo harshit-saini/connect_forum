@@ -3,10 +3,8 @@ import { and, count, eq, gte } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { PauseToggle } from "@/components/guide/pause-toggle";
 import { Card } from "@/components/ui/card";
-import type { GuideProfileData } from "@/schemas";
 import { db } from "@/server/db/client";
-import { connectionRequests } from "@/server/db/schema";
-import { loadProfileState } from "@/server/profile/service";
+import { connectionRequests, guideProfiles } from "@/server/db/schema";
 import { guideRatingSummary } from "@/server/ratings/service";
 import { startOfMonthUtc } from "@/server/time";
 import { requireCompletedProfile } from "@/server/viewer";
@@ -18,8 +16,7 @@ export default async function GuideDashboard() {
   const viewer = await requireCompletedProfile();
   if (viewer.role !== "guide") redirect("/dashboard");
 
-  const state = await loadProfileState(viewer.id, "guide");
-  const a = (state.data as unknown as GuideProfileData).availability;
+  const [profile] = await db().select({ max: guideProfiles.maxNewSeekersPerMonth, paused: guideProfiles.matchingPaused }).from(guideProfiles).where(eq(guideProfiles.userId, viewer.id));
   const monthStart = startOfMonthUtc();
   const [{ n: approved }] = await db().select({ n: count() }).from(connectionRequests).where(and(eq(connectionRequests.guideId, viewer.id), eq(connectionRequests.status, "approved"), gte(connectionRequests.approvedAt, monthStart)));
   const rating = await guideRatingSummary(viewer.id);
@@ -45,12 +42,12 @@ export default async function GuideDashboard() {
         </Card>
         <Card className="space-y-1">
           <h2 className="text-sm font-medium text-muted">This month</h2>
-          <p className="text-3xl font-semibold">{approved} <span className="text-base font-normal text-muted">of {a.maxNewSeekersPerMonth} new Seekers</span></p>
-          <p className="text-sm text-muted">You can change this limit in your <Link href="/profile/edit/availability" className="underline">availability settings</Link>.</p>
+          <p className="text-3xl font-semibold">{approved} <span className="text-base font-normal text-muted">of {profile?.max ?? 0} new Seekers</span></p>
+          <p className="text-sm text-muted">You can change this limit in your <Link href="/profile/edit" className="underline">profile</Link>.</p>
         </Card>
       </div>
 
-      <Card><PauseToggle paused={a.pauseMatching} /></Card>
+      <Card><PauseToggle paused={profile?.paused ?? false} /></Card>
 
       <Card className="space-y-1 text-sm">
         <h2 className="font-semibold">How requests reach you</h2>

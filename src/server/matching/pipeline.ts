@@ -112,13 +112,11 @@ type Scored = {
 };
 
 /** One-sentence explanation from the Guide's public fields only, used when the LLM is unavailable. */
-export function genericExplanation(parts: StructuredParts, g: PublicGuide, seekerNeeds: string[]): string {
+export function genericExplanation(parts: StructuredParts, g: PublicGuide, seekerCategory: string): string {
   const bits: string[] = [];
-  const shared = g.help.map((h) => h.type).filter((h) => seekerNeeds.includes(h));
-  if (parts.helpOverlap >= 0.4 && shared.length) bits.push(`can help with ${shared.slice(0, 2).join(" and ").toLowerCase()}`);
-  if (parts.functionIndustry >= 0.5) bits.push(`works in ${g.functions[0]?.toLowerCase() ?? "your target area"}${g.industries[0] ? ` (${g.industries[0]})` : ""}`);
-  if (parts.transition >= 1) bits.push("has made a similar career transition");
-  if (parts.stageFit >= 1) bits.push("often helps people at your career stage");
+  if (g.categories.includes(seekerCategory)) bits.push(`helps people with ${seekerCategory.toLowerCase()}`);
+  if (parts.experience >= 0.5) bits.push(`has ${g.years} years of experience as ${g.title}`);
+  if (parts.language >= 1) bits.push("speaks your languages");
   if (bits.length === 0) bits.push(`brings ${g.years} years of experience as ${g.title}`);
   const sentence = `This Guide ${bits.slice(0, 3).join(", ")}.`;
   return sentence.replace(/, ([^,]*)\.$/, ", and $1.").replace(/^(.{1,200}).*$/, "$1");
@@ -179,7 +177,7 @@ export async function executeRun(runId: string): Promise<void> {
     });
     scored.sort((a, b) => b.preliminary - a.preliminary);
     const pool = scored.slice(0, useVectors ? MATCHING.pipeline.candidates : MATCHING.pipeline.noEmbeddingsPool);
-    const needs = publicSeeker(ctx.data).helpNeeded;
+    const needs = publicSeeker(ctx.data).category;
 
     const toItem = (s: Scored, score: number, extra: Record<string, unknown>, explanation: string) => ({
       guideId: s.c.guideId,

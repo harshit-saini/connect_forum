@@ -12,8 +12,8 @@ You receive a seeker profile inside <seeker_profile> tags and a JSON list of can
 
 Task:
 1. Choose the best guides for this seeker, at most 5, best first.
-2. Give each a score from 0 to 100 for how well the guide can help this seeker with their stated goal and needs.
-3. For each, write ONE sentence (max 200 characters) explaining why the guide fits. Base it only on the guide's own fields in the candidate data. Do not mention the seeker's private details, do not invent facts, and do not include names, contact details, links or company names.
+2. Give each a score from 0 to 100 for how well the guide can help this seeker with their question.
+3. For each, write ONE sentence (max 200 characters) explaining why the guide fits. Base it only on the guide's own fields in the candidate data. Do not repeat the seeker's question, do not invent facts, and do not include names, contact details, links or company names.
 
 Output ONLY a JSON object, with no other text:
 {"ranked":[{"id":"<candidate id>","score":<0-100>,"why":"<one sentence>"}]}

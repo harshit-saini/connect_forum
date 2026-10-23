@@ -3,8 +3,8 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
 const steps = [
-  ["Tell us about your career", "Fill in a short profile. You appear only under an alias you choose."],
-  ["Get matched", "Seekers press “Find guides”; our AI ranks Guides who fit your goals, with a plain-language reason."],
+  ["Tell us your question", "A one-page form with your member ID. You appear only under an alias you choose."],
+  ["Get quick answers, then a match", "Common questions are answered first. If you still need help, we match you with a Guide and explain why."],
   ["Guide approves", "A Guide sees your anonymous request and decides. No approval, no contact."],
   ["Talk directly", "After approval you see the Guide's number in the portal and contact them yourself. Then rate the experience."],
 ];
@@ -22,9 +22,17 @@ export default async function Landing({ searchParams }: { searchParams: Promise<
           Connect matches job seekers with experienced professionals. Everyone stays anonymous until a Guide approves
           a connection.
         </p>
-        <Link href="/sign-in" className={buttonVariants({ className: "px-6" })}>
-          Get started
-        </Link>
+        <div className="flex flex-wrap gap-3">
+          <Link href="/join/seeker" className={buttonVariants({ className: "px-6" })}>
+            I need guidance
+          </Link>
+          <Link href="/join/guide" className={buttonVariants({ variant: "outline", className: "px-6" })}>
+            I want to guide others
+          </Link>
+          <Link href="/faq" className={buttonVariants({ variant: "ghost", className: "px-6" })}>
+            Read the FAQs
+          </Link>
+        </div>
       </section>
 
       <section aria-labelledby="how" className="space-y-4">

@@ -23,6 +23,6 @@ export default defineConfig({
     url: `http://localhost:${PORT}/api/health`,
     reuseExistingServer: !process.env.CI,
     timeout: 240_000,
-    env: { APP_URL: `http://localhost:${PORT}`, MOCK_AI: "true", NEXT_DIST_DIR: ".next-e2e", ADMIN_EMAILS: "admin@example.com" },
+    env: { APP_URL: `http://localhost:${PORT}`, MOCK_AI: "true", NEXT_DIST_DIR: ".next-e2e", ADMIN_EMAILS: "admin@example.com", GUIDE_MEMBER_IDS: "E2E-GUIDE-1,E2E-GUIDE-2", SEEKER_MEMBER_IDS: "E2E-SEEKER-1,E2E-SEEKER-2,E2E-SEEKER-3" },
   },
 });

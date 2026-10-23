@@ -17,7 +17,8 @@ export type AuditAction =
   | "data.exported"
   | "report.created"
   | "report.reviewed"
-  | "block.created";
+  | "block.created"
+  | "guide.invited";
 
 export type AuditEntry = {
   action: AuditAction;

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CONTACT_ERROR, normalizeCompany, screenText } from "@/lib/screening";
-import { seekerGoalsSchema } from "@/schemas/seeker";
-import { backgroundSchema, basicsSchema } from "@/schemas/shared-steps";
+import { guideFormSchema, seekerFormSchema } from "@/schemas";
 
 const blocked = (t: string) => screenText(t).errors.includes(CONTACT_ERROR);
 
@@ -51,30 +50,30 @@ describe("normalizeCompany", () => {
 });
 
 describe("schemas apply screening", () => {
-  it("rejects contact details in the seeker challenge", () => {
-    const r = seekerGoalsSchema.shape.challenge.safeParse("x".repeat(60) + " email me at a@b.com");
-    expect(r.success).toBe(false);
+  const seeker = { alias: "Curious Falcon", memberId: "seek-1001", category: "uncertainty", query: "I am not sure what to do next in my career.", languages: ["english"], totalYears: 4, agree: true };
+  const guide = { alias: "Steady Maple", memberId: "guide-1001", categories: ["uncertainty"], jobTitle: "Manager", totalYears: 10, about: "I have helped many people choose their next step.", languages: ["english"], maxNewSeekersPerMonth: 3, agree: true };
+
+  it("accepts a complete seeker form and normalises the member ID", () => {
+    const r = seekerFormSchema.safeParse(seeker);
+    expect(r.success && r.data.memberId).toBe("SEEK-1001");
   });
-  it("requires all three consents and a valid alias", () => {
-    const base = { alias: "ab", country: "IN", timezone: "Asia/Kolkata", languages: ["english"], consents: { terms: true, privacy: true, aiProcessing: false } };
-    const r = basicsSchema.safeParse(base);
+  it("rejects contact details in the seeker question and the guide's about text", () => {
+    expect(seekerFormSchema.safeParse({ ...seeker, query: seeker.query + " email me at a@b.com" }).success).toBe(false);
+    expect(guideFormSchema.safeParse({ ...guide, about: guide.about + " call me on 9876543210" }).success).toBe(false);
+  });
+  it("requires the consent box, a valid alias and a known category", () => {
+    const r = seekerFormSchema.safeParse({ ...seeker, alias: "ab", agree: false, category: "astrology" });
     expect(r.success).toBe(false);
     const paths = r.success ? [] : r.error.issues.map((i) => i.path.join("."));
-    expect(paths).toContain("alias");
-    expect(paths).toContain("consents.aiProcessing");
+    expect(paths).toEqual(expect.arrayContaining(["alias", "agree", "category"]));
   });
-  it("requires a past role for guides but not seekers", () => {
-    const v = { status: "employed_full_time", jobTitle: "Engineer", industry: "it_software", function: "software_engineering", totalYears: 5, seniority: "senior", skills: ["a", "b", "c"], timeline: [] };
-    expect(backgroundSchema("guide").safeParse(v).success).toBe(false);
-    expect(backgroundSchema("seeker").safeParse(v).success).toBe(true);
+  it("limits guides to the four pilot categories and at least one", () => {
+    expect(guideFormSchema.safeParse({ ...guide, categories: [] }).success).toBe(false);
+    expect(guideFormSchema.safeParse({ ...guide, categories: ["layoff_unemployment", "career_stagnation", "upskilling_training", "uncertainty"] }).success).toBe(true);
+    expect(guideFormSchema.safeParse({ ...guide, categories: ["resume_review"] }).success).toBe(false);
   });
-  it("rejects years in function above total experience", () => {
-    const v = { status: "student", jobTitle: "Student", industry: "it_software", function: "other", totalYears: 2, yearsInFunction: 5, seniority: "student", skills: ["a", "b", "c"] };
-    expect(backgroundSchema("seeker").safeParse(v).success).toBe(false);
-  });
-  it("only accepts linkedin.com URLs", () => {
-    const base = { status: "student", jobTitle: "Student", industry: "it_software", function: "other", totalYears: 1, seniority: "student", skills: ["a", "b", "c"] };
-    expect(backgroundSchema("seeker").safeParse({ ...base, linkedinUrl: "https://evil.com/in/x" }).success).toBe(false);
-    expect(backgroundSchema("seeker").safeParse({ ...base, linkedinUrl: "https://www.linkedin.com/in/x" }).success).toBe(true);
+  it("rejects a malformed member ID", () => {
+    expect(seekerFormSchema.safeParse({ ...seeker, memberId: "!!" }).success).toBe(false);
+    expect(seekerFormSchema.safeParse({ ...seeker, memberId: "  " }).success).toBe(false);
   });
 });

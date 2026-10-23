@@ -50,16 +50,10 @@ export default async function ReviewPage({ params }: { params: Promise<{ token: 
       </div>
       <Card>
         <dl className="space-y-4 text-sm">
-          <Block label="Career stage">{s.stage}</Block>
-          <Block label="Goal">{s.goal}</Block>
-          <Block label="Currently">{`${s.currentRole} · ${s.years} years`}</Block>
-          <Block label="Looking for">{`${s.targetRoles.join(", ")} · ${s.targetIndustries.join(", ")} · ${s.targetFunction}`}</Block>
-          <Block label="Timeline">{`${s.timeline} · ${s.searchStatus}`}</Block>
-          <Block label="Help needed (most important first)">{s.helpNeeded.map((h, i) => `${i + 1}. ${h}`).join("\n")}</Block>
-          <Block label="Biggest challenge">{s.challenge}</Block>
-          <Block label="Already tried">{s.triedSoFar}</Block>
-          <Block label="A great outcome">{s.desiredOutcome}</Block>
-          <Block label="Questions">{s.questions.join("\n")}</Block>
+          <Block label="Category">{s.category}</Block>
+          <Block label="Their question">{s.question}</Block>
+          <Block label="Experience">{`${s.years} years`}</Block>
+          <Block label="Languages">{s.languages.join(", ")}</Block>
           <Block label="Note to you">{review.note}</Block>
         </dl>
       </Card>

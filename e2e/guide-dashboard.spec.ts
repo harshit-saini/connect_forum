@@ -8,7 +8,7 @@ const url = process.env.DATABASE_URL ?? "postgres://cf:cf@localhost:5432/connect
 async function resetGuide() {
   const c = new pg.Client({ connectionString: url });
   await c.connect();
-  await c.query("update guide_profiles set matching_paused = false, data = jsonb_set(data, '{availability,pauseMatching}', 'false') where user_id = (select id from users where email = $1)", [GUIDE]);
+  await c.query("update guide_profiles set matching_paused = false where user_id = (select id from users where email = $1)", [GUIDE]);
   await c.end();
 }
 

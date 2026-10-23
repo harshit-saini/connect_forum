@@ -27,9 +27,10 @@ async function resetAuthRateLimits() {
   await client.end();
 }
 
-export async function signIn(page: Page, email: string) {
+/** Signs in through the real form. Pass `next` to follow a link the way a visitor would (e.g. /join/guide). */
+export async function signIn(page: Page, email: string, next?: string) {
   await resetAuthRateLimits();
-  await page.goto("/sign-in");
+  await page.goto(next ? `/sign-in?next=${encodeURIComponent(next)}` : "/sign-in");
   // The first load of a page under `next dev` can be interacted with before React hydrates, which turns
   // the click into a native form submit. Retry until the code step appears.
   await expect(async () => {
@@ -53,53 +54,38 @@ export async function sql<T = Record<string, unknown>>(text: string, params: unk
   }
 }
 
-async function addTag(page: Page, label: string, text: string) {
-  const box = page.getByRole("textbox", { name: label, exact: true });
-  await box.fill(text);
-  await box.press("Enter");
+/** Member IDs the e2e server accepts (see playwright.config.ts). Each test frees its ID before and after use. */
+export const E2E_IDS = { seeker: ["E2E-SEEKER-1", "E2E-SEEKER-2", "E2E-SEEKER-3"], guide: ["E2E-GUIDE-1", "E2E-GUIDE-2"] };
+
+/** Removes whoever registered with an e2e member ID, so repeated runs can use it again. */
+export async function freeMemberIds() {
+  for (const t of ["seeker_profiles", "guide_profiles"]) {
+    await sql(`delete from users where id in (select user_id from ${t} where member_id like 'E2E-%')`);
+  }
 }
 
-/** Fills the whole Seeker wizard (an engineer who wants to move into product) and submits it. */
-export async function completeSeekerWizard(page: Page) {
+/** Reaches the matching UI: a Seeker without a search yet sees the FAQs first, so choose "I still need a Guide". */
+export async function openFinder(page: Page) {
+  const find = page.getByRole("button", { name: /Find guides|Search again/ });
+  const escalate = page.getByRole("button", { name: "I still need a Guide" });
+  await expect(find.or(escalate)).toBeVisible();
+  // Retry: the click does nothing until the page has hydrated.
+  await expect(async () => {
+    if (await escalate.isVisible()) await escalate.click();
+    await expect(find).toBeVisible({ timeout: 2000 });
+  }).toPass({ timeout: 20_000 });
+}
+
+/** Fills and submits the Seeker form on /join/seeker. */
+export async function registerSeeker(page: Page, memberId: string, category = "Career Stagnation") {
+  await page.goto("/join/seeker");
+  await expect(page.getByRole("heading", { name: "Ask for guidance" })).toBeVisible();
+  await page.getByLabel("Member ID").fill(memberId);
   await page.getByRole("button", { name: "Suggest" }).click();
   await expect(page.getByLabel("Alias")).not.toHaveValue("");
-  await addTag(page, "Languages", "English");
-  await page.getByLabel(/Terms of use/).check();
-  await page.getByLabel(/Privacy policy/).check();
-  await page.getByLabel(/processed by AI/).check();
-  await page.getByRole("button", { name: "Save and continue" }).click();
-
-  await expect(page.getByRole("heading", { name: "Professional background" })).toBeVisible();
-  await page.getByLabel("Current status").selectOption("employed_full_time");
-  await page.getByLabel("Current job title").fill("Software engineer");
-  await page.getByLabel("Current industry").selectOption("it_software");
-  await page.getByLabel("Current job function").selectOption("software_engineering");
-  await page.getByLabel("Total years of experience").fill("3");
-  await page.getByLabel("Seniority level").selectOption("mid");
-  for (const s of ["Python", "SQL", "Communication"]) await addTag(page, "Skills", s);
-  await page.getByRole("button", { name: "Save and continue" }).click();
-
-  await expect(page.getByRole("heading", { name: "Goals and needs" })).toBeVisible();
-  await page.getByRole("radio", { name: /Early career/ }).check();
-  await page.getByRole("radio", { name: /Switch career/ }).check();
-  await page.getByLabel("Target role(s) 1").fill("Product manager");
-  await page.getByRole("checkbox", { name: "Fintech" }).check();
-  await page.getByLabel("Target function").selectOption("product_management");
-  await page.getByLabel("Timeline", { exact: true }).selectOption("6_months");
-  await page.getByLabel("Job search status").selectOption("preparing");
-  await page.getByRole("checkbox", { name: "Career switch planning" }).check();
-  await page.getByRole("checkbox", { name: "Interview preparation" }).check();
-  await page.getByLabel("Biggest challenge right now").fill("I am an engineer who wants to move into product management but I do not know how to show relevant experience or what to learn first.");
-  await page.getByRole("button", { name: "Save and continue" }).click();
-
-  await expect(page.getByRole("heading", { name: "Preferences" })).toBeVisible();
-  await page.getByRole("radio", { name: /A few sessions/ }).check();
-  await page.getByRole("radio", { name: "Video call" }).check();
-  await page.getByRole("checkbox", { name: "Tue Evening" }).click();
-  await page.getByRole("checkbox", { name: "Sat Morning" }).click();
-  await page.getByRole("button", { name: "Save and continue" }).click();
-
-  await expect(page.getByRole("heading", { name: "What others will see" })).toBeVisible();
-  await page.getByRole("button", { name: "Submit profile" }).click();
-  await expect(page).toHaveURL(/\/seeker$/);
+  await page.getByRole("radio", { name: new RegExp(category) }).check();
+  await page.getByLabel("Your question").fill("I have been in the same role for five years and want to move into product management but do not know where to start.");
+  await page.getByLabel("Years of work experience").fill("5");
+  await page.getByLabel(/I agree to the/).check();
+  await page.getByRole("button", { name: "Join", exact: true }).click();
 }

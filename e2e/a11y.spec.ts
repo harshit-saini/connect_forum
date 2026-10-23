@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
-import { signIn, sql } from "./helpers";
+import { E2E_IDS, freeMemberIds, openFinder, signIn, sql } from "./helpers";
 
 /** Serious and critical WCAG 2.x A/AA violations fail the test; the report names the rule and element. */
 async function expectAccessible(page: Page, label: string) {
@@ -12,7 +12,7 @@ async function expectAccessible(page: Page, label: string) {
 }
 
 test("public pages are accessible", async ({ page }) => {
-  for (const path of ["/", "/sign-in", "/terms", "/privacy", "/offline.html"]) {
+  for (const path of ["/", "/sign-in", "/join", "/faq", "/terms", "/privacy", "/offline.html"]) {
     await page.goto(path);
     await expectAccessible(page, path);
   }
@@ -22,6 +22,8 @@ test("signed-in Seeker screens are accessible", async ({ page }) => {
   await sql("delete from match_runs where seeker_id = (select id from users where email = 'seed-seeker-3@example.com')");
   await signIn(page, "seed-seeker-3@example.com");
   await page.goto("/seeker");
+  await expectAccessible(page, "/seeker (FAQs)");
+  await openFinder(page);
   await expectAccessible(page, "/seeker (before search)");
   await page.getByRole("button", { name: "Find guides" }).click();
   await expect(page.getByRole("listitem").filter({ hasText: "Why this Guide" }).first()).toBeVisible({ timeout: 60_000 });
@@ -29,7 +31,7 @@ test("signed-in Seeker screens are accessible", async ({ page }) => {
   await page.getByRole("button", { name: "I want to connect" }).first().click();
   await expectAccessible(page, "connect dialog");
   await page.keyboard.press("Escape");
-  for (const path of ["/seeker/connections", "/profile", "/profile/edit/goals", "/profile/edit/preferences", "/settings"]) {
+  for (const path of ["/seeker/connections", "/profile", "/profile/edit", "/settings"]) {
     await page.goto(path);
     await expectAccessible(page, path);
   }
@@ -37,23 +39,31 @@ test("signed-in Seeker screens are accessible", async ({ page }) => {
 
 test("signed-in Guide and Admin screens are accessible", async ({ page }) => {
   await signIn(page, "seed-guide-2@example.com");
-  for (const path of ["/guide", "/profile/edit/expertise", "/profile/edit/availability"]) {
+  for (const path of ["/guide", "/profile", "/profile/edit"]) {
     await page.goto(path);
     await expectAccessible(page, path);
   }
   await page.context().clearCookies();
   await signIn(page, "admin@example.com");
-  for (const path of ["/admin", "/admin/users", "/admin/reports", "/admin/ratings", "/admin/audit"]) {
+  for (const path of ["/admin", "/admin/invite", "/admin/users", "/admin/reports", "/admin/ratings", "/admin/audit"]) {
     await page.goto(path);
     await expectAccessible(page, path);
   }
 });
 
-test("the onboarding wizard steps are accessible", async ({ page }) => {
+test("the registration forms are accessible", async ({ page }) => {
+  await freeMemberIds();
   const email = `a11y-${Date.now()}@example.com`;
   await signIn(page, email);
-  await page.getByRole("button", { name: "Continue as Guide" }).click();
-  await expect(page).toHaveURL(/onboarding/);
-  await expectAccessible(page, "wizard: basics");
+  for (const role of ["seeker", "guide"]) {
+    await page.goto(`/join/${role}`);
+    await expect(page.getByLabel("Member ID")).toBeVisible();
+    await expectAccessible(page, `/join/${role}`);
+  }
+  // With errors showing as well.
+  await page.getByLabel("Member ID").fill(E2E_IDS.guide[1]!);
+  await page.getByRole("button", { name: "Join as a Guide" }).click();
+  await expect(page.getByText("Please fix the highlighted fields.")).toBeVisible();
+  await expectAccessible(page, "/join/guide (with errors)");
   await sql("delete from users where email = $1", [email]);
 });

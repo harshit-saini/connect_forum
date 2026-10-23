@@ -6,13 +6,14 @@ export const metadata = { title: "Sign in" };
 
 export default async function SignInPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
   const viewer = await getViewer();
-  if (viewer) redirect(dashboardPath(viewer.role));
   const { next } = await searchParams;
   // Only same-site relative paths are accepted as a post-login target.
-  const safeNext = next && next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard";
+  const target = next && next.startsWith("/") && !next.startsWith("//") ? next : null;
+  // A signed-in visitor goes where the link they used points (e.g. /join/guide), else to their dashboard.
+  if (viewer) redirect(target ?? dashboardPath(viewer.role));
   return (
     <div className="mx-auto max-w-md pt-10">
-      <SignInForm next={safeNext} />
+      <SignInForm next={target ?? "/dashboard"} />
     </div>
   );
 }

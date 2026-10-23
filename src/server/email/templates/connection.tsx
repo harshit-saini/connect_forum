@@ -4,7 +4,7 @@ import { EmailLayout } from "./layout";
 const button = { backgroundColor: "#0f766e", borderRadius: 8, color: "#fff", padding: "12px 20px" } as const;
 
 /** To a Guide. Alias and public career details only: never any contact information. */
-export function ConnectionRequestEmail({ seekerAlias, stage, goal, target, help, link, days }: { seekerAlias: string; stage: string; goal: string; target: string; help: string[]; link: string; days: number }) {
+export function ConnectionRequestEmail({ seekerAlias, category, question, link, days }: { seekerAlias: string; category: string; question: string; link: string; days: number }) {
   return (
     <EmailLayout preview={`${seekerAlias} would like your guidance`}>
       <Heading as="h1" style={{ fontSize: 22, margin: "0 0 12px" }}>
@@ -13,10 +13,8 @@ export function ConnectionRequestEmail({ seekerAlias, stage, goal, target, help,
       <Text>
         <strong>{seekerAlias}</strong> asked to connect with you.
       </Text>
-      <Text style={{ margin: "4px 0" }}>Career stage: {stage}</Text>
-      <Text style={{ margin: "4px 0" }}>Goal: {goal}</Text>
-      <Text style={{ margin: "4px 0" }}>Looking for: {target}</Text>
-      <Text style={{ margin: "4px 0" }}>Help needed: {help.join(", ")}</Text>
+      <Text style={{ margin: "4px 0" }}>Category: {category}</Text>
+      <Text style={{ margin: "4px 0" }}>Their question: {question}</Text>
       <Text>You can review the request, then approve or decline. Your phone number is shared with this Seeker only if you approve. No login needed. The link works once and expires in {days} days.</Text>
       <Button href={link} style={button}>Review the request</Button>
       <Text style={{ color: "#6b7280", fontSize: 13 }}>Link: {link}</Text>

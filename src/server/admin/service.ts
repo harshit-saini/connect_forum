@@ -2,7 +2,10 @@ import "server-only";
 import { aliasedTable, and, count, desc, eq, ilike, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
 import { audit } from "@/server/audit";
 import { db } from "@/server/db/client";
-import { auditLog, guideProfiles, ratings, reports, seekerProfiles, sessions, userAliases, userRoles, users } from "@/server/db/schema";
+import { auditLog, faqEvents, guideProfiles, ratings, reports, seekerProfiles, sessions, userAliases, userRoles, users } from "@/server/db/schema";
+import { sendEmail } from "@/server/email";
+import { GuideInviteEmail } from "@/server/email/templates/guide-invite";
+import { env } from "@/server/env";
 import { bumpCounter, GUIDE_POOL_VERSION } from "@/server/profile/counters";
 
 export const PAGE_SIZE = 25;
@@ -146,3 +149,58 @@ export async function listAudit(args: { action?: string; page: number }): Promis
   return { total: n, rows, actions: (distinct as unknown as { rows: { action: string }[] }).rows.map((r) => r.action) };
 }
 
+
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const MAX_INVITES_PER_SUBMISSION = 25;
+
+/** Splits a pasted list (commas, semicolons, spaces or new lines) into unique, valid, lower-cased addresses. */
+export function parseInviteEmails(raw: string): { valid: string[]; invalid: string[] } {
+  const seen = new Set<string>();
+  const valid: string[] = [];
+  const invalid: string[] = [];
+  for (const part of raw.split(/[\s,;]+/).map((p) => p.trim().toLowerCase()).filter(Boolean)) {
+    if (seen.has(part)) continue;
+    seen.add(part);
+    (EMAIL.test(part) && part.length <= 254 ? valid : invalid).push(part);
+  }
+  return { valid, invalid };
+}
+
+export type InviteResult = { ok: true; sent: number; failed: number; invalid: string[] } | { ok: false; message: string };
+
+/** Emails each address the Guide registration link. Addresses are not stored; the audit entry holds counts only. */
+export async function inviteGuides(adminId: string, raw: string): Promise<InviteResult> {
+  const { valid, invalid } = parseInviteEmails(raw);
+  if (valid.length === 0) return { ok: false, message: invalid.length ? "None of those look like email addresses." : "Enter at least one email address." };
+  if (valid.length > MAX_INVITES_PER_SUBMISSION) return { ok: false, message: `Send at most ${MAX_INVITES_PER_SUBMISSION} invitations at a time.` };
+
+  const link = `${env().APP_URL}/join/guide`;
+  let sent = 0;
+  let failed = 0;
+  for (const to of valid) {
+    try {
+      await sendEmail({ to, subject: "You're invited to join Connect as a Guide", kind: "guide-invite", react: GuideInviteEmail({ link }) });
+      sent++;
+    } catch {
+      failed++;
+    }
+  }
+  await audit(db(), { action: "guide.invited", actorId: adminId, metadata: { sent, failed } });
+  return { ok: true, sent, failed, invalid };
+}
+
+/** How the FAQs performed: Seekers who said they answered the question versus those who still needed a Guide. */
+export async function faqStats() {
+  const rows = await db()
+    .select({ category: faqEvents.category, outcome: faqEvents.outcome, n: count() })
+    .from(faqEvents)
+    .groupBy(faqEvents.category, faqEvents.outcome);
+  const byCategory = new Map<string, { resolved: number; escalated: number }>();
+  for (const r of rows) {
+    const entry = byCategory.get(r.category) ?? { resolved: 0, escalated: 0 };
+    if (r.outcome === "resolved") entry.resolved = r.n;
+    else entry.escalated = r.n;
+    byCategory.set(r.category, entry);
+  }
+  return byCategory;
+}

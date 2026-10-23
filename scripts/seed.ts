@@ -1,13 +1,14 @@
 import "dotenv/config";
 import { eq } from "drizzle-orm";
 import { db } from "@/server/db/client";
-import { userRoles, users } from "@/server/db/schema";
+import { users } from "@/server/db/schema";
 import { processJobs } from "@/server/jobs/worker";
-import { saveStep, submitProfile } from "@/server/profile/service";
+import { saveProfile } from "@/server/profile/service";
 
 /**
  * Seeds fake Seekers and Guides (fake e-mail addresses and fake phone numbers only) through the real
- * profile service, so derived columns and embedding jobs behave exactly as in production.
+ * profile service, so derived columns and embedding jobs behave exactly as in production. The member-ID
+ * check applies: add SEED-GUIDE-1..N to GUIDE_MEMBER_IDS and SEED-SEEKER-1..N to SEEKER_MEMBER_IDS first.
  * Idempotent: existing seed users are skipped.   Usage: pnpm seed [--guides 12] [--seekers 6]
  */
 const arg = (name: string, def: number) => {
@@ -18,50 +19,36 @@ const arg = (name: string, def: number) => {
 const ADJ = ["Bright", "Calm", "Keen", "Bold", "Warm", "Swift", "Kind", "Steady", "Clever", "Brave", "Quiet", "Sunny"];
 const NOUN = ["Falcon", "Maple", "River", "Lantern", "Compass", "Harbor", "Willow", "Summit", "Meadow", "Comet", "Otter", "Cedar"];
 
-const GUIDE_TEMPLATES = [
-  { fn: "product_management", ind: "fintech", help: ["career_switch", "interview_prep", "skill_roadmap"], stages: ["early_career", "career_switcher"], tr: ["changed_function", "ic_to_manager"], title: "Director of Product", years: 14, sen: "director", hire: "hired_managed", summary: "I moved from engineering into product management and have led product teams in fintech for over a decade. I have hired many product managers and enjoy helping engineers make the switch." },
-  { fn: "software_engineering", ind: "it_software", help: ["interview_prep", "mock_interviews", "promotion_growth"], stages: ["early_career", "mid_career"], tr: ["rapid_promotions"], title: "Staff engineer", years: 11, sen: "lead", hire: "regular", summary: "I have spent eleven years building distributed systems, interviewing candidates and mentoring engineers towards senior and staff roles." },
-  { fn: "data_analytics", ind: "data_ai", help: ["skill_roadmap", "career_switch", "resume_review"], stages: ["student", "recent_graduate", "career_switcher"], tr: ["non_tech_to_tech", "changed_industry"], title: "Analytics manager", years: 9, sen: "manager", hire: "regular", summary: "I started in operations, taught myself SQL and Python, and moved into analytics. I help career switchers build a realistic data skill roadmap." },
-  { fn: "marketing", ind: "ecommerce_retail", help: ["job_search_strategy", "linkedin_branding", "salary_negotiation"], stages: ["mid_career", "between_jobs"], tr: ["changed_industry"], title: "Head of marketing", years: 15, sen: "director", hire: "hired_managed", summary: "Fifteen years in e-commerce marketing. I help mid-career professionals sharpen their personal brand, run a focused job search and negotiate offers." },
-  { fn: "hr_people", ind: "consulting", help: ["resume_review", "interview_prep", "networking_referrals"], stages: ["student", "recent_graduate", "early_career"], tr: [], title: "Senior HR business partner", years: 10, sen: "senior", hire: "hired_managed", summary: "A decade in HR and talent acquisition. I review resumes daily and know what recruiters look for at the screening stage." },
-  { fn: "finance_accounting", ind: "banking_financial", help: ["career_switch", "higher_studies", "work_abroad"], stages: ["early_career", "mid_career"], tr: ["moved_abroad", "studied_then_switched"], title: "Vice president, finance", years: 13, sen: "executive", hire: "regular", summary: "I moved abroad for an MBA and switched from audit to corporate finance. I advise on studying and working overseas." },
-  { fn: "design", ind: "it_software", help: ["skill_roadmap", "resume_review", "freelancing_entrepreneurship"], stages: ["student", "recent_graduate", "career_switcher"], tr: ["non_tech_to_tech", "started_business"], title: "Principal designer", years: 12, sen: "lead", hire: "occasional", summary: "I came to UX from print design, later freelanced for years and now lead a design team. I help people build portfolios and decide between freelancing and a full-time role." },
-  { fn: "operations", ind: "logistics_supply_chain", help: ["career_break_return", "job_search_strategy", "leadership_management"], stages: ["returning", "between_jobs", "mid_career"], tr: ["returned_after_break", "ic_to_manager"], title: "Operations director", years: 17, sen: "director", hire: "hired_managed", summary: "I returned to work after a two-year break and moved into operations leadership. I coach people returning after a career break." },
-  { fn: "sales", ind: "it_software", help: ["salary_negotiation", "promotion_growth", "networking_referrals"], stages: ["early_career", "mid_career"], tr: ["rapid_promotions"], title: "Regional sales head", years: 12, sen: "director", hire: "regular", summary: "Twelve years in enterprise software sales. I help people grow into leadership and negotiate compensation." },
-  { fn: "cybersecurity", ind: "banking_financial", help: ["skill_roadmap", "career_switch", "industry_insights"], stages: ["career_switcher", "early_career"], tr: ["changed_function"], title: "Security architect", years: 10, sen: "senior", hire: "occasional", summary: "I moved from network engineering into security and now design controls for a large bank. I share how the field really works." },
-  { fn: "project_program_management", ind: "manufacturing_engineering", help: ["leadership_management", "interview_prep", "promotion_growth"], stages: ["mid_career", "senior"], tr: ["ic_to_manager"], title: "Program manager", years: 14, sen: "manager", hire: "regular", summary: "Fourteen years running large engineering programs. I coach engineers moving into management." },
-  { fn: "research_academia", ind: "education_edtech", help: ["higher_studies", "work_abroad", "resume_review"], stages: ["student", "recent_graduate"], tr: ["studied_then_switched", "moved_abroad"], title: "Research scientist", years: 8, sen: "senior", hire: "occasional", summary: "I did my PhD abroad and moved to industry research. I help students plan postgraduate studies and applications." },
+const GUIDES = [
+  { title: "Director of Product", years: 14, categories: ["career_stagnation", "uncertainty"], about: "I moved from engineering into product and have led product teams for over a decade. I help people who feel stuck decide whether to move up, across or out." },
+  { title: "Staff engineer", years: 11, categories: ["career_stagnation", "upskilling_training"], about: "Eleven years building systems and mentoring engineers towards senior roles. I help with choosing what to learn next and how to show growth." },
+  { title: "Analytics manager", years: 9, categories: ["upskilling_training", "uncertainty"], about: "I started in operations, taught myself SQL and Python, and moved into analytics. I help people pick a realistic learning path." },
+  { title: "Head of marketing", years: 15, categories: ["layoff_unemployment", "career_stagnation"], about: "Fifteen years in marketing, including two restructurings. I help people through a layoff and plan a focused job search." },
+  { title: "Senior HR business partner", years: 10, categories: ["layoff_unemployment", "uncertainty"], about: "A decade in HR and talent acquisition. I know what recruiters look for and how to explain a gap or a layoff." },
+  { title: "Vice president, finance", years: 13, categories: ["uncertainty", "upskilling_training"], about: "I switched from audit to corporate finance after an MBA abroad. I help people weigh a change of direction." },
+  { title: "Principal designer", years: 12, categories: ["upskilling_training", "career_stagnation"], about: "I came to design from print, freelanced for years, and now lead a team. I help people build skills and portfolios." },
+  { title: "Operations director", years: 17, categories: ["layoff_unemployment", "uncertainty"], about: "I returned to work after a two-year break and moved into operations leadership. I coach people restarting after a setback." },
+  { title: "Regional sales head", years: 12, categories: ["career_stagnation"], about: "Twelve years in enterprise sales. I help people grow into leadership and ask for the next role." },
+  { title: "Security architect", years: 10, categories: ["upskilling_training"], about: "I moved from network engineering into security. I share how the field really works and what to learn first." },
+  { title: "Program manager", years: 14, categories: ["career_stagnation", "layoff_unemployment"], about: "Fourteen years running large programs. I coach people moving into management or back into work." },
+  { title: "Research scientist", years: 8, categories: ["uncertainty", "upskilling_training"], about: "I did my PhD abroad and moved to industry research. I help students and early professionals plan next steps." },
 ] as const;
 
-const SEEKER_TEMPLATES = [
-  { stage: "early_career", goal: "switch_career", roles: ["Product manager"], inds: ["fintech"], fn: "product_management", help: ["career_switch", "interview_prep", "skill_roadmap"], cur: { title: "Software engineer", fn: "software_engineering", ind: "it_software" }, challenge: "I am a software engineer with three years of experience who wants to move into product management. I do not know how to show relevant experience or which skills to build first." },
-  { stage: "student", goal: "first_job", roles: ["Data analyst"], inds: ["data_ai"], fn: "data_analytics", help: ["resume_review", "skill_roadmap", "interview_prep"], cur: { title: "Student", fn: "data_analytics", ind: "data_ai" }, challenge: "I am in my final year studying statistics and want a first job as a data analyst. My resume has projects but no work experience and I am not sure how to stand out." },
-  { stage: "returning", goal: "return_after_break", roles: ["Operations manager"], inds: ["logistics_supply_chain"], fn: "operations", help: ["career_break_return", "job_search_strategy", "resume_review"], cur: { title: "Operations lead", fn: "operations", ind: "logistics_supply_chain" }, challenge: "I took a two year break to care for family and want to return to operations. I worry about the gap on my resume and how recruiters will see it." },
-  { stage: "mid_career", goal: "move_to_management", roles: ["Engineering manager"], inds: ["it_software"], fn: "software_engineering", help: ["leadership_management", "promotion_growth", "interview_prep"], cur: { title: "Senior software engineer", fn: "software_engineering", ind: "it_software" }, challenge: "I have been a senior engineer for six years and want to become an engineering manager. I have led projects but never managed people and I am unsure how to make the case." },
-  { stage: "student", goal: "study_work_abroad", roles: ["Research scientist"], inds: ["education_edtech"], fn: "research_academia", help: ["higher_studies", "work_abroad", "resume_review"], cur: { title: "Student", fn: "research_academia", ind: "education_edtech" }, challenge: "I want to do a masters abroad and then work in research. I need help choosing programs, preparing applications and understanding visa and job options afterwards." },
-  { stage: "mid_career", goal: "better_job", roles: ["Marketing director"], inds: ["ecommerce_retail"], fn: "marketing", help: ["job_search_strategy", "salary_negotiation", "linkedin_branding"], cur: { title: "Marketing manager", fn: "marketing", ind: "ecommerce_retail" }, challenge: "I am a marketing manager looking for a director role. My applications get few replies and I am not confident about negotiating compensation when offers do come." },
+const SEEKERS = [
+  { category: "career_stagnation", years: 6, query: "I have been a senior engineer for six years and want to become a manager, but I have never managed people and I am unsure how to make the case." },
+  { category: "layoff_unemployment", years: 8, query: "I was laid off last month after a restructuring. I am not sure how to explain it in interviews or where to start my search." },
+  { category: "upskilling_training", years: 3, query: "I want to move from operations into data analytics and need help choosing which skills and courses are worth my time." },
+  { category: "uncertainty", years: 10, query: "I am not sure whether to stay in my field or change direction entirely. I would like to talk to someone who has done it." },
+  { category: "layoff_unemployment", years: 4, query: "I have been out of work for four months and my applications get few replies. I would like advice on my resume and approach." },
+  { category: "career_stagnation", years: 12, query: "My role has not changed in five years and I do not know whether to push for a promotion or look elsewhere." },
 ] as const;
 
-const SUMMARY_TAIL = " I am happy to share what worked for me, what I would do differently, and how the hiring process looks from the other side.";
-
-const slots = (i: number) => [["tue.evening", "sat.morning", "thu.evening"], ["wed.evening", "sun.morning", "mon.night"], ["tue.afternoon", "fri.evening", "sat.afternoon"]][i % 3]!;
-
-async function ensureUser(email: string, role: "seeker" | "guide") {
+async function ensureUser(email: string) {
   const [existing] = await db().select().from(users).where(eq(users.email, email));
   if (existing) return null;
   const [u] = await db().insert(users).values({ email, emailVerified: true }).returning();
-  await db().insert(userRoles).values({ userId: u!.id, role });
   return u!;
 }
-
-async function must(label: string, p: Promise<{ ok: boolean }>) {
-  const r = await p;
-  if (!r.ok) throw new Error(`${label} failed: ${JSON.stringify(r)}`);
-}
-
-const basics = (alias: string, lang = ["english", "hindi"]) => ({
-  alias, country: "IN", timezone: "Asia/Kolkata", languages: lang, consents: { terms: true, privacy: true, aiProcessing: true },
-});
 
 async function guarded(email: string, fn: () => Promise<boolean>) {
   try {
@@ -72,33 +59,33 @@ async function guarded(email: string, fn: () => Promise<boolean>) {
   }
 }
 
+/** Seed IDs must be on the allow-lists too: pnpm seed prints the ones to add to .env. */
+const seedGuideId = (i: number) => `SEED-GUIDE-${i + 1}`;
+const seedSeekerId = (i: number) => `SEED-SEEKER-${i + 1}`;
+
 async function seedGuide(i: number) {
-  const t = GUIDE_TEMPLATES[i % GUIDE_TEMPLATES.length]!;
-  const u = await ensureUser(`seed-guide-${i + 1}@example.com`, "guide");
+  const t = GUIDES[i % GUIDES.length]!;
+  const u = await ensureUser(`seed-guide-${i + 1}@example.com`);
   if (!u) return false;
-  const userId = u.id;
   const alias = `${ADJ[i % ADJ.length]}${NOUN[(i * 5) % NOUN.length]}${10 + i}`;
-  const timeline = [{ title: `${t.title.split(" ")[0]} lead`, industry: t.ind, function: t.fn, startYear: 2015, endYear: null, summary: "Led a team and delivered several large initiatives." }];
-  await must("basics", saveStep({ userId, role: "guide", step: "basics", values: basics(alias) }));
-  await must("background", saveStep({ userId, role: "guide", step: "background", values: { status: "employed_full_time", jobTitle: t.title, industry: t.ind, function: t.fn, totalYears: t.years, yearsInFunction: Math.min(t.years, 8), seniority: t.sen, skills: ["Leadership", "Coaching", "Communication"], timeline } }));
-  await must("expertise", saveStep({ userId, role: "guide", step: "expertise", values: { primaryFunctions: [t.fn], primaryIndustries: [t.ind], help: t.help.map((h, k) => ({ type: h, level: k === 0 ? "expert" : "solid" })), stagesBestAt: [...t.stages], transitions: [...t.tr], hiringExperience: t.hire, experienceSummary: t.summary + SUMMARY_TAIL } }));
-  await must("availability", saveStep({ userId, role: "guide", step: "availability", values: { maxNewSeekersPerMonth: 4, availability: slots(i), sessionLength: "30", mode: "video", contactPreference: "call", bestTime: "Weekday evenings", acknowledgement: true }, phone: `+9190000000${String(i + 1).padStart(2, "0")}` }));
-  await must("submit", submitProfile({ userId, role: "guide" }));
+  const r = await saveProfile({
+    userId: u.id, role: "guide", phone: `+9190000000${String(i + 1).padStart(2, "0")}`,
+    values: { alias, memberId: seedGuideId(i), categories: [...t.categories], jobTitle: t.title, totalYears: t.years, about: t.about, languages: ["english", "hindi"], maxNewSeekersPerMonth: 4, agree: true },
+  });
+  if (!r.ok) throw new Error(`guide ${i + 1}: ${JSON.stringify(r.fieldErrors)}`);
   return true;
 }
 
 async function seedSeeker(i: number) {
-  const t = SEEKER_TEMPLATES[i % SEEKER_TEMPLATES.length]!;
-  const u = await ensureUser(`seed-seeker-${i + 1}@example.com`, "seeker");
+  const t = SEEKERS[i % SEEKERS.length]!;
+  const u = await ensureUser(`seed-seeker-${i + 1}@example.com`);
   if (!u) return false;
-  const userId = u.id;
   const alias = `${ADJ[(i + 3) % ADJ.length]}${NOUN[(i * 7 + 2) % NOUN.length]}${50 + i}`;
-  const student = t.stage === "student";
-  await must("basics", saveStep({ userId, role: "seeker", step: "basics", values: basics(alias) }));
-  await must("background", saveStep({ userId, role: "seeker", step: "background", values: { status: student ? "student" : "employed_full_time", jobTitle: t.cur.title, industry: t.cur.ind, function: t.cur.fn, totalYears: student ? 0 : 4, seniority: student ? "student" : "mid", skills: ["Excel", "SQL", "Communication"] } }));
-  await must("goals", saveStep({ userId, role: "seeker", step: "goals", values: { careerStage: t.stage, primaryGoal: t.goal, targetRoles: [...t.roles], targetIndustries: [...t.inds], targetFunction: t.fn, timeline: "6_months", jobSearchStatus: "preparing", helpNeeded: [...t.help], challenge: t.challenge } }));
-  await must("preferences", saveStep({ userId, role: "seeker", step: "preferences", values: { minGuideExperience: "5", mustShareLanguage: true, similarTransition: true, engagementStyle: "few_sessions", mode: "video", availability: slots(i) } }));
-  await must("submit", submitProfile({ userId, role: "seeker" }));
+  const r = await saveProfile({
+    userId: u.id, role: "seeker",
+    values: { alias, memberId: seedSeekerId(i), category: t.category, query: t.query, languages: ["english", "hindi"], totalYears: t.years, agree: true },
+  });
+  if (!r.ok) throw new Error(`seeker ${i + 1}: ${JSON.stringify(r.fieldErrors)}`);
   return true;
 }
 
@@ -110,7 +97,7 @@ async function main() {
   for (let i = 0; i < guides; i++) if (await guarded(`seed-guide-${i + 1}@example.com`, () => seedGuide(i))) g++;
   for (let i = 0; i < seekers; i++) if (await guarded(`seed-seeker-${i + 1}@example.com`, () => seedSeeker(i))) s++;
   const jobs = await processJobs({ maxMs: 120_000, maxJobs: 500 }); // compute embeddings now
-  console.log(`seeded ${g} guides and ${s} seekers (${jobs} jobs processed). Sign in as seed-seeker-1@example.com or seed-guide-1@example.com`);
+  console.log(`(member IDs used: SEED-GUIDE-1.. and SEED-SEEKER-1..; they must be on the allow-lists)\nseeded ${g} guides and ${s} seekers (${jobs} jobs processed). Sign in as seed-seeker-1@example.com or seed-guide-1@example.com`);
   process.exit(0);
 }
 

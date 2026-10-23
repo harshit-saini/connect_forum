@@ -54,10 +54,8 @@ export async function sendEmailJob(payload: Payload, jobId?: string): Promise<vo
         kind: "connection-request",
         react: ConnectionRequestEmail({
           seekerAlias: alias.alias,
-          stage: pub.stage,
-          goal: pub.goal,
-          target: `${pub.targetRoles.join(", ")} (${pub.targetIndustries.join(", ")})`,
-          help: pub.helpNeeded.slice(0, 3),
+          category: pub.category,
+          question: pub.question,
           link: `${env().APP_URL}/review/${token}`,
           days: REQUEST_TTL_DAYS,
         }),

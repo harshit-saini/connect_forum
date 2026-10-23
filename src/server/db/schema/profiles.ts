@@ -17,7 +17,7 @@ export const userAliases = pgTable(
   (t) => [uniqueIndex("user_aliases_alias_lower_uq").on(sql`lower(${t.alias})`)],
 );
 
-/** Autosaved, not-yet-submitted wizard answers. Never contains phone numbers. */
+/** Legacy: autosaved answers of the old multi-step wizard. Unused since the pilot single-page form; kept so no data is dropped. */
 export const profileDrafts = pgTable("profile_drafts", {
   userId: uuid("user_id")
     .primaryKey()
@@ -34,21 +34,24 @@ const common = () => ({
     .notNull()
     .unique()
     .references(() => users.id, { onDelete: "cascade" }),
+  /** The ID checked against the allow-list at registration. Unique per role table (private). */
+  memberId: text("member_id"),
   /** The validated answers, exactly as entered (source of truth for display, editing and AI documents). */
   data: jsonb("data").$type<Record<string, unknown>>().notNull().default({}),
   /** Bumped on every matching-relevant change. */
   profileVersion: integer("profile_version").notNull().default(0),
   profileCompletedAt: timestamp("profile_completed_at", { withTimezone: true }),
   // Columns derived from `data` so hard filters and scores run in SQL.
-  country: text("country"),
-  timezone: text("timezone"),
   languages: text("languages").array().notNull().default(sql`'{}'::text[]`),
   totalYears: integer("total_years"),
+  // Legacy columns from the long pre-pilot wizard. Nothing reads or writes them any more; they are kept
+  // (not dropped) so the pilot migration deletes no data. A later migration can drop them.
+  country: text("country"),
+  timezone: text("timezone"),
   seniority: text("seniority"),
   currentIndustry: text("current_industry"),
   currentFunction: text("current_function"),
   skills: text("skills").array().notNull().default(sql`'{}'::text[]`),
-  /** Normalised company names the user never wants to be matched with (never sent to AI). */
   excludedCompanies: text("excluded_companies").array().notNull().default(sql`'{}'::text[]`),
   availability: text("availability").array().notNull().default(sql`'{}'::text[]`),
   mode: text("mode"),
@@ -57,22 +60,32 @@ const common = () => ({
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
 
-export const seekerProfiles = pgTable("seeker_profiles", {
-  ...common(),
-  careerStage: text("career_stage"),
-  primaryGoal: text("primary_goal"),
-  targetIndustries: text("target_industries").array().notNull().default(sql`'{}'::text[]`),
-  targetFunction: text("target_function"),
-  helpNeeded: text("help_needed").array().notNull().default(sql`'{}'::text[]`),
-  minGuideExperience: integer("min_guide_experience").notNull().default(0),
-  mustShareLanguage: boolean("must_share_language").notNull().default(true),
-  engagementStyle: text("engagement_style"),
-});
+export const seekerProfiles = pgTable(
+  "seeker_profiles",
+  {
+    ...common(),
+    category: text("category"),
+    // Legacy (see above).
+    careerStage: text("career_stage"),
+    primaryGoal: text("primary_goal"),
+    targetIndustries: text("target_industries").array().notNull().default(sql`'{}'::text[]`),
+    targetFunction: text("target_function"),
+    helpNeeded: text("help_needed").array().notNull().default(sql`'{}'::text[]`),
+    minGuideExperience: integer("min_guide_experience").notNull().default(0),
+    mustShareLanguage: boolean("must_share_language").notNull().default(true),
+    engagementStyle: text("engagement_style"),
+  },
+  (t) => [uniqueIndex("seeker_profiles_member_id_uq").on(t.memberId)],
+);
 
 export const guideProfiles = pgTable(
   "guide_profiles",
   {
     ...common(),
+    categories: text("categories").array().notNull().default(sql`'{}'::text[]`),
+    maxNewSeekersPerMonth: integer("max_new_seekers_per_month"),
+    matchingPaused: boolean("matching_paused").notNull().default(false),
+    // Legacy (see above).
     primaryFunctions: text("primary_functions").array().notNull().default(sql`'{}'::text[]`),
     primaryIndustries: text("primary_industries").array().notNull().default(sql`'{}'::text[]`),
     helpTypes: text("help_types").array().notNull().default(sql`'{}'::text[]`),
@@ -80,11 +93,29 @@ export const guideProfiles = pgTable(
     transitions: text("transitions").array().notNull().default(sql`'{}'::text[]`),
     hiringExperience: text("hiring_experience"),
     wontHelpTypes: text("wont_help_types").array().notNull().default(sql`'{}'::text[]`),
-    maxNewSeekersPerMonth: integer("max_new_seekers_per_month"),
     sessionLength: integer("session_length"),
-    matchingPaused: boolean("matching_paused").notNull().default(false),
   },
-  (t) => [index("guide_profiles_matchable_idx").on(t.matchingPaused, t.totalYears)],
+  (t) => [
+    uniqueIndex("guide_profiles_member_id_uq").on(t.memberId),
+    index("guide_profiles_matchable_idx").on(t.matchingPaused, t.totalYears),
+  ],
+);
+
+/**
+ * One row per FAQ interaction on the Seeker dashboard, so the pilot can see how many questions were
+ * answered by self-service. Holds no free text.
+ */
+export const faqEvents = pgTable(
+  "faq_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    category: text("category").notNull(),
+    /** "resolved": the FAQ answered it. "escalated": the Seeker still wants a Guide. */
+    outcome: text("outcome").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("faq_events_created_idx").on(t.createdAt)],
 );
 
 const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });

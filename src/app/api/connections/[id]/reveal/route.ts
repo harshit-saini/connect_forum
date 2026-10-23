@@ -26,5 +26,5 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     const error = result.code === "unavailable" ? "This Guide's number is no longer available." : result.code === "not_approved" ? "This request hasn't been approved." : "Not found";
     return Response.json({ error }, { status, headers: NO_STORE });
   }
-  return Response.json({ phone: result.phone, contactPreference: result.contactPreference, bestTime: result.bestTime }, { headers: NO_STORE });
+  return Response.json({ phone: result.phone }, { headers: NO_STORE });
 }
