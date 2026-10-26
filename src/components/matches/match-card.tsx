@@ -21,7 +21,7 @@ const CONNECTION_LABEL: Record<Match["connection"], string | null> = {
   expired: "Request expired",
 };
 
-export function MatchCardView({ match, action }: { match: Match; action?: React.ReactNode }) {
+export function MatchCardView({ match, action, ai = false }: { match: Match; action?: React.ReactNode; ai?: boolean }) {
   const { guide } = match;
   const status = CONNECTION_LABEL[match.connection];
   return (
@@ -29,6 +29,7 @@ export function MatchCardView({ match, action }: { match: Match; action?: React.
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="text-lg font-semibold">{match.alias}</h3>
+          {ai && <span className="mt-0.5 inline-block rounded-full border border-border px-2 py-0.5 text-xs text-muted">AI match</span>}
           <p className="text-sm text-muted">{guide.title} · {guide.years} yrs</p>
         </div>
         <div className="text-right">

@@ -3,14 +3,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { matchingCopy } from "@/lib/branding";
 import type { RunView } from "@/server/matching/view";
 import { ConnectButton } from "./connect-button";
 import { MatchCardView } from "./match-card";
 
-const STAGES = ["Starting your search", "Finding Guides who fit", "Ranking the best matches"];
 const ACTIVE = new Set(["queued", "matching", "ranking"]);
 
-export function FindGuides({ initial }: { initial: RunView | null }) {
+export function FindGuides({ initial, ai = false }: { initial: RunView | null; ai?: boolean }) {
+  const copy = matchingCopy(ai);
+  const STAGES = copy.stages;
   const [view, setView] = useState<RunView | null>(initial);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -108,7 +110,7 @@ export function FindGuides({ initial }: { initial: RunView | null }) {
         <ol className="space-y-4">
           {view.matches.map((m) => (
             <li key={m.matchId}>
-              <MatchCardView match={m} action={<ConnectButton matchId={m.matchId} alias={m.alias} onDone={() => void load(view!.id)} />} />
+              <MatchCardView match={m} ai={ai} action={<ConnectButton matchId={m.matchId} alias={m.alias} onDone={() => void load(view!.id)} />} />
             </li>
           ))}
         </ol>
@@ -124,7 +126,7 @@ export function FindGuides({ initial }: { initial: RunView | null }) {
       {!view && (
         <Card>
           <h3 className="font-semibold">Ready when you are</h3>
-          <p className="mt-1 text-sm text-muted">Press “Find guides” and we&apos;ll rank Guides who fit your goals, and explain why each one could help. Everyone stays anonymous until a Guide approves.</p>
+          <p className="mt-1 text-sm text-muted">{copy.ready}</p>
         </Card>
       )}
     </section>

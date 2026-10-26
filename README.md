@@ -113,6 +113,8 @@ Validated with zod at server start (`src/server/env.ts`); a bad config fails fas
 | `FROM_EMAIL` | yes\* | Sender, e.g. `Connect <no-reply@mail.example.com>`. |
 | `RESEND_API_KEY` | live | Resend API key. |
 | `RESEND_WEBHOOK_SECRET` | live | Resend webhook signing secret (`whsec_…`). |
+| `AI_ENABLED` | no (true) | Master switch. `false` removes the LLM rerank and the embeddings: Guides are matched from the profile answers alone (category, shared language, experience, focus, ratings) and none of the `FOUNDRY_*` / `EMBEDDING_*` settings are needed. |
+| `AI_BRANDING` | no (follows `AI_ENABLED`) | Whether the UI describes matching as AI-driven ("AI match" badge, progress and landing copy). Presentation only; the consent checkbox always says what really happens. |
 | `LLM_PROVIDER` | no (`anthropic`) | `anthropic` for a Claude deployment, `openai` for an OpenAI (GPT) deployment on Foundry. |
 | `FOUNDRY_ENDPOINT` | live | Chat model resource URL, e.g. `https://<resource>.services.ai.azure.com`. |
 | `FOUNDRY_API_KEY` | live | Chat model key. |

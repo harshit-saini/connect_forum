@@ -21,12 +21,15 @@ export function JoinForm({
   initial,
   memberId,
   phone,
+  aiProcessing,
 }: {
   role: Role;
   initial: Record<string, unknown>;
   /** Set when editing: the ID already registered. */
   memberId: string | null;
   phone: { has: boolean; last4: string | null };
+  /** Real AI_ENABLED: the consent text must describe what actually happens to the text. */
+  aiProcessing: boolean;
 }) {
   const editing = memberId !== null;
   const form = useForm<FieldValues>({
@@ -113,7 +116,7 @@ export function JoinForm({
         {!editing && (
           <CheckboxField name="agree" label="">
             I agree to the <Link href="/terms" target="_blank" className="underline">Terms</Link> and{" "}
-            <Link href="/privacy" target="_blank" className="underline">Privacy policy</Link>, and to my question and profile text being processed by AI for matching.
+            <Link href="/privacy" target="_blank" className="underline">Privacy policy</Link>, and to my question and profile text being {aiProcessing ? "processed by AI" : "processed automatically"} for matching.
           </CheckboxField>
         )}
 
