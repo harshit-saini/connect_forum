@@ -45,6 +45,19 @@ const schema = z
     /** The IDs allowed to register as a Guide / as a Seeker (comma- or newline-separated). Empty means nobody can. */
     GUIDE_MEMBER_IDS: memberIds,
     SEEKER_MEMBER_IDS: memberIds,
+    /**
+     * Master switch for every AI feature. `false` removes the LLM rerank and the embeddings: matching uses
+     * only the profile answers, and no Foundry settings are needed.
+     */
+    AI_ENABLED: bool(true),
+    /**
+     * Whether the UI describes matching as AI-driven. Unset means "follow AI_ENABLED". Only presentation
+     * copy changes; consent, privacy and terms text always describe what really happens.
+     */
+    AI_BRANDING: z
+      .enum(["true", "false", "1", "0"])
+      .optional()
+      .transform((v) => (v === undefined ? undefined : v === "true" || v === "1")),
     /** Which API the chat deployment speaks: Claude (Anthropic Messages) or an OpenAI model (chat completions). */
     LLM_PROVIDER: z.enum(["anthropic", "openai"]).default("anthropic"),
     FOUNDRY_ENDPOINT: z.string().url().optional(),
@@ -91,14 +104,22 @@ const schema = z
     if (env.SEEKER_MEMBER_IDS.length === 0) ctx.addIssue({ code: "custom", path: ["SEEKER_MEMBER_IDS"], message: "required when MOCK_AI=false (member-ID check)" });
     need("RESEND_API_KEY", "email");
     need("RESEND_WEBHOOK_SECRET", "email webhook");
-    need("FOUNDRY_ENDPOINT", "chat model");
-    need("FOUNDRY_API_KEY", "chat model");
-    need("LLM_DEPLOYMENT", "chat model");
-    if (env.ENABLE_EMBEDDINGS) {
-      need("EMBEDDING_ENDPOINT", "embeddings");
-      need("EMBEDDING_API_KEY", "embeddings");
+    if (env.AI_ENABLED) {
+      need("FOUNDRY_ENDPOINT", "chat model");
+      need("FOUNDRY_API_KEY", "chat model");
+      need("LLM_DEPLOYMENT", "chat model");
+      if (env.ENABLE_EMBEDDINGS) {
+        need("EMBEDDING_ENDPOINT", "embeddings");
+        need("EMBEDDING_API_KEY", "embeddings");
+      }
     }
-  });
+  })
+  .transform((e) => ({
+    ...e,
+    // With AI off there are no vectors either, so everything that asks "are embeddings on?" gets the right answer.
+    ENABLE_EMBEDDINGS: e.ENABLE_EMBEDDINGS && e.AI_ENABLED,
+    AI_BRANDING: e.AI_BRANDING ?? e.AI_ENABLED,
+  }));
 
 export type Env = z.infer<typeof schema>;
 

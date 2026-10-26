@@ -89,6 +89,7 @@ export class FoundryEmbeddingProvider implements EmbeddingProvider {
 }
 
 export function embeddingProvider(): EmbeddingProvider {
+  if (!env().AI_ENABLED) throw new Error("AI is disabled (AI_ENABLED=false)");
   const e = env();
   if (e.MOCK_AI) return new MockEmbeddingProvider();
   return new FoundryEmbeddingProvider(e.EMBEDDING_ENDPOINT!, e.EMBEDDING_API_KEY!, e.EMBEDDING_DEPLOYMENT);

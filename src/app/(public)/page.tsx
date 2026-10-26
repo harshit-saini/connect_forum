@@ -1,16 +1,19 @@
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { matchingCopy } from "@/lib/branding";
+import { env } from "@/server/env";
 
-const steps = [
+const baseSteps = [
   ["Tell us your question", "A one-page form with your member ID. You appear only under an alias you choose."],
-  ["Get quick answers, then a match", "Common questions are answered first. If you still need help, we match you with a Guide and explain why."],
+  null, // replaced by the matching step (see matchingCopy)
   ["Guide approves", "A Guide sees your anonymous request and decides. No approval, no contact."],
   ["Talk directly", "After approval you see the Guide's number in the portal and contact them yourself. Then rate the experience."],
 ];
 
 export default async function Landing({ searchParams }: { searchParams: Promise<{ deleted?: string }> }) {
   const { deleted } = await searchParams;
+  const steps = baseSteps.map((s) => s ?? matchingCopy(env().AI_BRANDING).landingMatch);
   return (
     <div className="space-y-14 pt-8 sm:pt-16">
       {deleted && (

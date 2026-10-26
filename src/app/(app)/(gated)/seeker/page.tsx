@@ -6,6 +6,7 @@ import { FindGuides } from "@/components/matches/find-guides";
 import { FAQS } from "@/config/faqs";
 import { CATEGORIES, labelOf } from "@/config/taxonomy";
 import { db } from "@/server/db/client";
+import { env } from "@/server/env";
 import { seekerProfiles } from "@/server/db/schema";
 import { getRunView, latestRunId } from "@/server/matching/view";
 import { requireCompletedProfile } from "@/server/viewer";
@@ -19,7 +20,7 @@ export default async function SeekerDashboard() {
   const initial = runId ? await getRunView(runId, viewer.id) : null;
   const [profile] = await db().select({ category: seekerProfiles.category }).from(seekerProfiles).where(eq(seekerProfiles.userId, viewer.id));
   const category = CATEGORIES.find((c) => c.value === profile?.category);
-  const finder = <FindGuides initial={initial} />;
+  const finder = <FindGuides initial={initial} ai={env().AI_BRANDING} />;
   return (
     <div className="space-y-8">
       <div className="flex items-baseline justify-between">

@@ -76,3 +76,24 @@ describe("member ID allow-lists", () => {
     expect(() => parseEnv({ ...base, MOCK_AI: "true", GUIDE_MEMBER_IDS: "ok-1,bad id!" } as never)).toThrow(/member ID/);
   });
 });
+
+describe("AI_ENABLED and AI_BRANDING", () => {
+  const live = { ...base, MOCK_AI: "false", RESEND_API_KEY: "k", RESEND_WEBHOOK_SECRET: "s", GUIDE_MEMBER_IDS: "G-1", SEEKER_MEMBER_IDS: "S-1" };
+
+  it("defaults to AI on, and requires the model settings when it is on and live", () => {
+    expect(parseEnv({ ...base, MOCK_AI: "true" } as never)).toMatchObject({ AI_ENABLED: true, AI_BRANDING: true, ENABLE_EMBEDDINGS: true });
+    expect(() => parseEnv(live as never)).toThrow(/FOUNDRY_ENDPOINT/);
+  });
+
+  it("needs no model settings with AI off, and turns embeddings off with it", () => {
+    const env = parseEnv({ ...live, AI_ENABLED: "false", ENABLE_EMBEDDINGS: "true" } as never);
+    expect(env.AI_ENABLED).toBe(false);
+    expect(env.ENABLE_EMBEDDINGS).toBe(false);
+  });
+
+  it("AI_BRANDING follows AI_ENABLED unless set explicitly", () => {
+    expect(parseEnv({ ...live, AI_ENABLED: "false" } as never).AI_BRANDING).toBe(false);
+    expect(parseEnv({ ...live, AI_ENABLED: "false", AI_BRANDING: "true" } as never)).toMatchObject({ AI_ENABLED: false, AI_BRANDING: true });
+    expect(parseEnv({ ...base, MOCK_AI: "true", AI_BRANDING: "false" } as never)).toMatchObject({ AI_ENABLED: true, AI_BRANDING: false });
+  });
+});

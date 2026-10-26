@@ -85,7 +85,8 @@ export async function startRun(seekerId: string, profileVersion: number): Promis
   const startOfDay = new Date();
   startOfDay.setUTCHours(0, 0, 0, 0);
   const [{ n: llmToday }] = (await db().select({ n: sql<number>`count(*)::int` }).from(matchRuns).where(and(ne(matchRuns.status, "failed"), eq(matchRuns.degraded, false), gte(matchRuns.startedAt, startOfDay)))) as [{ n: number }];
-  const degraded = llmToday >= e.MAX_LLM_RUNS_PER_DAY;
+  // With AI off nothing is degraded: plain profile matching is the normal path.
+  const degraded = e.AI_ENABLED && llmToday >= e.MAX_LLM_RUNS_PER_DAY;
 
   try {
     const runId = await db().transaction(async (tx) => {
@@ -202,7 +203,7 @@ export async function executeRun(runId: string): Promise<void> {
     };
 
     const ids = top.map((_, i) => `c${i + 1}`);
-    const llmResult = run.degraded ? null : await rerank(publicSeeker(ctx.data), top.map((s, i) => ({ id: ids[i]!, guide: s.pub })));
+    const llmResult = run.degraded || !e.AI_ENABLED ? null : await rerank(publicSeeker(ctx.data), top.map((s, i) => ({ id: ids[i]!, guide: s.pub })));
 
     let finalItems;
     if (llmResult) {

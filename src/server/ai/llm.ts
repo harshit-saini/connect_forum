@@ -160,6 +160,7 @@ export class MockLlmProvider implements LlmProvider {
 
 export function llmProvider(): LlmProvider {
   const e = env();
+  if (!e.AI_ENABLED) throw new Error("AI is disabled (AI_ENABLED=false)");
   if (e.MOCK_AI) return new MockLlmProvider();
   const opts = { maxRetries: 3, timeoutMs: 45_000 };
   return e.LLM_PROVIDER === "openai"

@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { JoinForm } from "@/components/join/join-form";
+import { env } from "@/server/env";
 import { loadProfileState } from "@/server/profile/service";
 import { dashboardPath, requireViewer, type Role } from "@/server/viewer";
 
@@ -26,7 +27,7 @@ export default async function JoinPage({ params }: { params: Promise<{ role: str
         <h1 className="text-3xl font-semibold">{title}</h1>
         <p className="mt-1 text-muted">{intro}</p>
       </div>
-      <JoinForm role={role} initial={{}} memberId={null} phone={state.phone} />
+      <JoinForm role={role} initial={{}} memberId={null} phone={state.phone} aiProcessing={env().AI_ENABLED} />
     </div>
   );
 }
