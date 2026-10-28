@@ -51,13 +51,12 @@ type Row = {
   data: GuideProfileData;
   total_years: number;
   categories: string[];
-  max_new_seekers_per_month: number;
   similarity: number | null;
 };
 
 /**
  * Hard filters (HF), all in SQL: verified and active account, registered profile (member ID on file), not
- * paused, experience threshold, remaining monthly capacity, the Guide covers the Seeker's category, a shared
+ * paused, experience threshold, the Guide covers the Seeker's category, a shared
  * no block or report between the pair, and no pending or approved connection for the pair.
  * With vectors, results are ordered by cosine similarity to the Seeker's needs vector.
  */
@@ -68,7 +67,7 @@ export async function findCandidates(s: SeekerContext): Promise<Candidate[]> {
   const order = vec ? sql`e.embedding <=> ${vec} nulls last` : sql`g.total_years desc`;
 
   const res = await db().execute(sql`
-    select g.user_id, g.data, g.total_years, g.categories, g.max_new_seekers_per_month,
+    select g.user_id, g.data, g.total_years, g.categories,
            ${simCol} as similarity
     from guide_profiles g
     join users u on u.id = g.user_id
@@ -79,8 +78,6 @@ export async function findCandidates(s: SeekerContext): Promise<Candidate[]> {
       and g.matching_paused = false
       and g.total_years >= ${f.minGuideYears}
       and ${f.category} = any(g.categories)
-      and (select count(*) from connection_requests cr
-           where cr.guide_id = g.user_id and cr.status = 'approved' and cr.approved_at >= date_trunc('month', now())) < g.max_new_seekers_per_month
       and not exists (select 1 from blocks b where (b.blocker_id = ${s.userId} and b.blocked_id = g.user_id) or (b.blocker_id = g.user_id and b.blocked_id = ${s.userId}))
       and not exists (select 1 from reports r where (r.reporter_id = ${s.userId} and r.reported_id = g.user_id) or (r.reporter_id = g.user_id and r.reported_id = ${s.userId}))
       and not exists (select 1 from connection_requests cr where cr.seeker_id = ${s.userId} and cr.guide_id = g.user_id and cr.status in ('pending', 'approved'))
@@ -94,7 +91,6 @@ export async function findCandidates(s: SeekerContext): Promise<Candidate[]> {
     facts: {
       categories: r.categories,
       totalYears: r.total_years,
-      maxNewSeekersPerMonth: r.max_new_seekers_per_month,
     },
   }));
 }

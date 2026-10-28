@@ -1,5 +1,5 @@
 import "server-only";
-import { and, count, desc, eq, gte, lt, sql } from "drizzle-orm";
+import { and, count, desc, eq, lt, sql } from "drizzle-orm";
 import { optionalFreeText } from "@/schemas/common";
 import type { SeekerProfileData } from "@/schemas";
 import { audit } from "@/server/audit";
@@ -8,7 +8,6 @@ import { blocks, connectionRequests, guideProfiles, matches, reports, seekerProf
 import { env } from "@/server/env";
 import { queue } from "@/server/jobs";
 import { publicSeeker, type PublicSeeker } from "@/server/matching/public";
-import { bumpCounter, GUIDE_POOL_VERSION } from "@/server/profile/counters";
 import { generateToken, hashToken, looksLikeToken } from "@/server/tokens";
 import { sealToString } from "@/server/vault";
 
@@ -89,7 +88,7 @@ export async function loadReview(token: string): Promise<ReviewState> {
 
 export type DecideResult =
   | { ok: true; outcome: "approved" | "declined" }
-  | { ok: false; code: "invalid" | "expired" | "answered" | "unavailable" | "capacity"; message: string };
+  | { ok: false; code: "invalid" | "expired" | "answered" | "unavailable"; message: string };
 
 /**
  * Records the Guide's decision. The request row is locked, the token must still be unused and
@@ -118,23 +117,16 @@ export async function decide(token: string, decision: "approve" | "decline"): Pr
     }
 
     const [guide] = await tx
-      .select({ suspendedAt: users.suspendedAt, deletedAt: users.deletedAt, max: guideProfiles.maxNewSeekersPerMonth })
+      .select({ suspendedAt: users.suspendedAt, deletedAt: users.deletedAt })
       .from(users)
       .innerJoin(guideProfiles, eq(guideProfiles.userId, users.id))
       .where(eq(users.id, r.guideId));
     if (!guide || guide.suspendedAt || guide.deletedAt) return { ok: false, code: "unavailable", message: "This request can no longer be approved." } as const;
 
-    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    const [{ n: approvedThisMonth }] = await tx.select({ n: count() }).from(connectionRequests).where(and(eq(connectionRequests.guideId, r.guideId), eq(connectionRequests.status, "approved"), gte(connectionRequests.approvedAt, monthStart)));
-    if (guide.max !== null && approvedThisMonth >= guide.max) {
-      return { ok: false, code: "capacity", message: `You've reached your limit of ${guide.max} new Seekers this month. You can raise it in your profile settings.` } as const;
-    }
-
     await tx.update(connectionRequests).set({ status: "approved", decidedAt: now, approvedAt: now, tokenUsedAt: now }).where(eq(connectionRequests.id, r.id));
     const [unlock] = await tx.insert(unlocks).values({ seekerId: r.seekerId, guideId: r.guideId, connectionRequestId: r.id }).onConflictDoNothing().returning({ id: unlocks.id });
     await audit(tx, { action: "connection.approved", actorId: r.guideId, targetId: r.seekerId, subjectType: "connection_request", subjectId: r.id });
     if (unlock) await audit(tx, { action: "unlock.created", actorId: r.guideId, targetId: r.seekerId, subjectType: "unlock", subjectId: unlock.id });
-    await bumpCounter(tx, GUIDE_POOL_VERSION); // the Guide's remaining capacity changed
     await queue().enqueue(tx, "send_email", { kind: "request_approved", userId: r.seekerId, requestId: r.id }, { idempotencyKey: `req_approved:${r.id}` });
     // "How was your Guide?" goes out RATING_DELAY_DAYS later (any worker run or the daily sweep sends it).
     await queue().enqueue(tx, "rating_reminder", { userId: r.seekerId, requestId: r.id }, { runAt: new Date(now.getTime() + env().RATING_DELAY_DAYS * 86_400_000), idempotencyKey: `rating_reminder:${r.id}` });

@@ -38,7 +38,6 @@ export const guideFormSchema = z.object({
   jobTitle: freeText(2, 80),
   totalYears: years,
   about: freeText(30, 500),
-  maxNewSeekersPerMonth: z.number({ error: "Enter a number" }).int().min(1, "At least 1").max(10, "At most 10"),
   agree,
 });
 

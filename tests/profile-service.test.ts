@@ -122,7 +122,6 @@ describe("guide registration", () => {
     const [g] = await db().select().from(guideProfiles).where(eq(guideProfiles.userId, u.id));
     expect(JSON.stringify(g)).not.toContain("9876543210");
     expect(g!.categories).toEqual(["career_stagnation", "uncertainty"]);
-    expect(g!.maxNewSeekersPerMonth).toBe(3);
     expect(g!.profileVersion).toBe(1);
     expect(await poolVersion()).toBeGreaterThan(before);
   });

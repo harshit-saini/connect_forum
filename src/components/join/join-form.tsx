@@ -34,7 +34,7 @@ export function JoinForm({
   const editing = memberId !== null;
   const form = useForm<FieldValues>({
     defaultValues: {
-      ...(role === "guide" ? { categories: [], maxNewSeekersPerMonth: 3 } : {}),
+      ...(role === "guide" ? { categories: [] } : {}),
       ...initial,
       memberId: memberId ?? "",
       agree: editing,
@@ -106,7 +106,6 @@ export function JoinForm({
 
         {role === "guide" && (
           <>
-            <NumberField name="maxNewSeekersPerMonth" label="New Seekers you can take each month" hint="1 to 10" min={1} max={10} />
             <PhoneField last4={phone.last4} value={phoneValue} onChange={setPhoneValue} error={phoneError} defaultCountry={DEFAULT_COUNTRY} />
           </>
         )}

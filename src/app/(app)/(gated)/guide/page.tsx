@@ -16,7 +16,7 @@ export default async function GuideDashboard() {
   const viewer = await requireCompletedProfile();
   if (viewer.role !== "guide") redirect("/dashboard");
 
-  const [profile] = await db().select({ max: guideProfiles.maxNewSeekersPerMonth, paused: guideProfiles.matchingPaused }).from(guideProfiles).where(eq(guideProfiles.userId, viewer.id));
+  const [profile] = await db().select({ paused: guideProfiles.matchingPaused }).from(guideProfiles).where(eq(guideProfiles.userId, viewer.id));
   const monthStart = startOfMonthUtc();
   const [{ n: approved }] = await db().select({ n: count() }).from(connectionRequests).where(and(eq(connectionRequests.guideId, viewer.id), eq(connectionRequests.status, "approved"), gte(connectionRequests.approvedAt, monthStart)));
   const rating = await guideRatingSummary(viewer.id);
@@ -42,8 +42,8 @@ export default async function GuideDashboard() {
         </Card>
         <Card className="space-y-1">
           <h2 className="text-sm font-medium text-muted">This month</h2>
-          <p className="text-3xl font-semibold">{approved} <span className="text-base font-normal text-muted">of {profile?.max ?? 0} new Seekers</span></p>
-          <p className="text-sm text-muted">You can change this limit in your <Link href="/profile/edit" className="underline">profile</Link>.</p>
+          <p className="text-3xl font-semibold">{approved} <span className="text-base font-normal text-muted">new Seekers approved</span></p>
+          <p className="text-sm text-muted">Pause matching below at any time if you need a break.</p>
         </Card>
       </div>
 

@@ -5,7 +5,7 @@ import {
 } from "@/server/matching/scoring";
 
 const seeker: SeekerFacts = { category: "career_stagnation" };
-const guide: GuideFacts = { categories: ["career_stagnation"], totalYears: 15, maxNewSeekersPerMonth: 4 };
+const guide: GuideFacts = { categories: ["career_stagnation"], totalYears: 15 };
 
 describe("experience and focus", () => {
   it("rewards experience up to a ceiling", () => {

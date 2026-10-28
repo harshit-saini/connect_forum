@@ -24,7 +24,7 @@ export type SeekerForm = {
 };
 export type GuideForm = {
   alias: string; memberId: string; categories: string[]; jobTitle: string; totalYears: number; about: string;
-  maxNewSeekersPerMonth: number; agree: boolean;
+  agree: boolean;
 };
 
 export const seekerForm = (over: Partial<SeekerForm> = {}): SeekerForm => ({
@@ -44,7 +44,6 @@ export const guideForm = (over: Partial<GuideForm> = {}): GuideForm => ({
   jobTitle: "Engineering manager",
   totalYears: 12,
   about: "I moved from engineer to manager and have mentored many people who felt stuck in their roles.",
-  maxNewSeekersPerMonth: 3,
   agree: true,
   ...over,
 });

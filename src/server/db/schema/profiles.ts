@@ -84,6 +84,7 @@ export const guideProfiles = pgTable(
   {
     ...common(),
     categories: text("categories").array().notNull().default(sql`'{}'::text[]`),
+    /** Legacy: a monthly limit was asked in an earlier pilot form and is no longer used. */
     maxNewSeekersPerMonth: integer("max_new_seekers_per_month"),
     matchingPaused: boolean("matching_paused").notNull().default(false),
     // Legacy (see above).

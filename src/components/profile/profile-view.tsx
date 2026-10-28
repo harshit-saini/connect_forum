@@ -30,7 +30,6 @@ export function ProfileView({ role, data, memberId, phone }: { role: Role; data:
             <Item label="Categories" value={d.categories?.map((c) => labelOf(CATEGORIES, c)).join(", ")} />
             <Item label="Role" value={d.jobTitle} />
             <Item label="About" value={d.about} />
-            <Item label="New Seekers per month" value={d.maxNewSeekersPerMonth} />
             <Item label="Phone number" value={phone.has ? `Saved securely (ends ${phone.last4})` : "Not set"} />
           </>
         )}

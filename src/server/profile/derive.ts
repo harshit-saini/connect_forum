@@ -12,7 +12,6 @@ export function deriveGuide(d: GuideProfileData) {
   return {
     categories: dedupe(d.categories),
     totalYears: d.totalYears,
-    maxNewSeekersPerMonth: d.maxNewSeekersPerMonth,
   };
 }
 

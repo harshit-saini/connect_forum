@@ -30,7 +30,6 @@ describe("hard filters", () => {
     const blockedByGuide = (await makeGuide()).user;
     const reported = (await makeGuide()).user;
     const pending = (await makeGuide()).user;
-    const full = (await makeGuide({ maxNewSeekersPerMonth: 1 })).user;
     const legacy = (await makeGuide()).user; // registered before the pilot: no member ID on file
 
     await db().update(guideProfiles).set({ matchingPaused: true }).where(eq(guideProfiles.userId, paused.id));
@@ -41,13 +40,10 @@ describe("hard filters", () => {
     const req = (guideId: string, status: string, approvedAt?: Date) =>
       db().insert(connectionRequests).values({ seekerId: seeker.id, guideId, status, tokenHash: randomUUID(), expiresAt: new Date(Date.now() + 86400000), approvedAt });
     await req(pending.id, "pending");
-    // Capacity: one Seeker already approved this month fills a guide with max 1.
-    const other = (await makeSeeker()).user;
-    await db().insert(connectionRequests).values({ seekerId: other.id, guideId: full.id, status: "approved", approvedAt: new Date(), tokenHash: randomUUID(), expiresAt: new Date(Date.now() + 86400000) });
 
     const ids = await candidateIds(seeker.id);
     expect(ids).toContain(ok.id);
-    for (const [name, g] of Object.entries({ paused, junior, otherCategory, suspended, blockedByGuide, reported, pending, full, legacy })) {
+    for (const [name, g] of Object.entries({ paused, junior, otherCategory, suspended, blockedByGuide, reported, pending, legacy })) {
       expect(ids, name).not.toContain(g.id);
     }
   });

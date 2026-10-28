@@ -1,7 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/server/db/client";
-import { auditLog, blocks, connectionRequests, counters, devOutbox, guideProfiles, jobs, matchRuns, matches, unlocks, users } from "@/server/db/schema";
+import { auditLog, blocks, connectionRequests, devOutbox, guideProfiles, jobs, matchRuns, matches, unlocks, users } from "@/server/db/schema";
 import { createRequest, decide, expireRequests, loadReview } from "@/server/connections/service";
 import { processJobs } from "@/server/jobs/worker";
 import { csrfFor, generateToken, hashToken, looksLikeToken, verifyCsrf } from "@/server/tokens";
@@ -139,10 +139,9 @@ describe("reviewing and deciding", () => {
     expect(await loadReview(generateToken())).toEqual({ state: "invalid" });
   });
 
-  it("approving creates one unlock, audit entries, a pool bump, and an approved e-mail without the number", async () => {
+  it("approving creates one unlock, audit entries, and an approved e-mail without the number", async () => {
     const p = await pair();
     const { token, requestId } = await requestWithToken(p);
-    const before = (await db().select().from(counters).where(eq(counters.name, "guide_pool_version")))[0]?.value ?? 0;
 
     expect(await decide(token, "approve")).toEqual({ ok: true, outcome: "approved" });
     const [r] = await db().select().from(connectionRequests).where(eq(connectionRequests.id, requestId));
@@ -155,7 +154,6 @@ describe("reviewing and deciding", () => {
     const actions = (await db().select().from(auditLog).where(eq(auditLog.subjectId, requestId))).map((a) => a.action);
     expect(actions).toEqual(expect.arrayContaining(["connection.requested", "connection.approved"]));
     expect((await db().select().from(auditLog).where(eq(auditLog.subjectId, ul[0]!.id))).map((a) => a.action)).toEqual(["unlock.created"]);
-    expect((await db().select().from(counters).where(eq(counters.name, "guide_pool_version")))[0]!.value).toBe(before + 1);
 
     await processJobs({ maxMs: 20_000 });
     const [mail] = await emailsTo(p.seeker.user.email).then((m) => m.filter((x) => x.subject.includes("approved")));
@@ -202,17 +200,18 @@ describe("reviewing and deciding", () => {
     expect((await emailsTo(p.seeker.user.email)).some((m) => m.subject.includes("wasn't answered in time"))).toBe(true);
   });
 
-  it("will not approve for a suspended guide or beyond the guide's monthly capacity", async () => {
+  it("will not approve for a suspended guide, but has no monthly limit for an active one", async () => {
     const s = await pair();
     const { token: t1 } = await requestWithToken(s);
     await db().update(users).set({ suspendedAt: new Date() }).where(eq(users.id, s.guide.user.id));
     expect(await decide(t1, "approve")).toMatchObject({ ok: false, code: "unavailable" });
 
-    const c = await pair({ mutateGuide: { maxNewSeekersPerMonth: 1 } });
+    const c = await pair();
     const { token: t2 } = await requestWithToken(c);
-    const second = await makeSeeker();
-    await db().insert(connectionRequests).values({ seekerId: second.user.id, guideId: c.guide.user.id, status: "approved", approvedAt: new Date(), tokenHash: generateToken(), expiresAt: new Date(Date.now() + 1e9) });
-    expect(await decide(t2, "approve")).toMatchObject({ ok: false, code: "capacity" });
-    expect(await decide(t2, "decline")).toEqual({ ok: true, outcome: "declined" }); // declining is always possible
+    for (let i = 0; i < 6; i++) {
+      const other = await makeSeeker();
+      await db().insert(connectionRequests).values({ seekerId: other.user.id, guideId: c.guide.user.id, status: "approved", approvedAt: new Date(), tokenHash: generateToken(), expiresAt: new Date(Date.now() + 1e9) });
+    }
+    expect(await decide(t2, "approve")).toEqual({ ok: true, outcome: "approved" }); // however many were approved this month
   });
 });
