@@ -50,8 +50,8 @@ describe("normalizeCompany", () => {
 });
 
 describe("schemas apply screening", () => {
-  const seeker = { alias: "Curious Falcon", memberId: "seek-1001", category: "uncertainty", query: "I am not sure what to do next in my career.", languages: ["english"], totalYears: 4, agree: true };
-  const guide = { alias: "Steady Maple", memberId: "guide-1001", categories: ["uncertainty"], jobTitle: "Manager", totalYears: 10, about: "I have helped many people choose their next step.", languages: ["english"], maxNewSeekersPerMonth: 3, agree: true };
+  const seeker = { alias: "Curious Falcon", memberId: "seek-1001", category: "uncertainty", query: "I am not sure what to do next in my career.", totalYears: 4, agree: true };
+  const guide = { alias: "Steady Maple", memberId: "guide-1001", categories: ["uncertainty"], jobTitle: "Manager", totalYears: 10, about: "I have helped many people choose their next step.", maxNewSeekersPerMonth: 3, agree: true };
 
   it("accepts a complete seeker form and normalises the member ID", () => {
     const r = seekerFormSchema.safeParse(seeker);

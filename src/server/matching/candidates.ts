@@ -13,7 +13,7 @@ export type SeekerContext = {
   data: SeekerProfileData;
   facts: SeekerFacts;
   /** Hard-filter inputs (private; never leave the server or reach the AI). */
-  filters: { category: string; languages: string[]; minGuideYears: number };
+  filters: { category: string; minGuideYears: number };
   embedding: number[] | null;
 };
 
@@ -40,8 +40,8 @@ export async function loadSeekerContext(userId: string, useVectors: boolean): Pr
     userId,
     profileVersion: p.profileVersion,
     data,
-    facts: { category: data.category, languages: p.languages },
-    filters: { category: data.category, languages: p.languages, minGuideYears: env().MIN_GUIDE_EXPERIENCE_YEARS },
+    facts: { category: data.category },
+    filters: { category: data.category, minGuideYears: env().MIN_GUIDE_EXPERIENCE_YEARS },
     embedding,
   };
 }
@@ -51,7 +51,6 @@ type Row = {
   data: GuideProfileData;
   total_years: number;
   categories: string[];
-  languages: string[];
   max_new_seekers_per_month: number;
   similarity: number | null;
 };
@@ -59,7 +58,7 @@ type Row = {
 /**
  * Hard filters (HF), all in SQL: verified and active account, registered profile (member ID on file), not
  * paused, experience threshold, remaining monthly capacity, the Guide covers the Seeker's category, a shared
- * language, no block or report between the pair, and no pending or approved connection for the pair.
+ * no block or report between the pair, and no pending or approved connection for the pair.
  * With vectors, results are ordered by cosine similarity to the Seeker's needs vector.
  */
 export async function findCandidates(s: SeekerContext): Promise<Candidate[]> {
@@ -69,7 +68,7 @@ export async function findCandidates(s: SeekerContext): Promise<Candidate[]> {
   const order = vec ? sql`e.embedding <=> ${vec} nulls last` : sql`g.total_years desc`;
 
   const res = await db().execute(sql`
-    select g.user_id, g.data, g.total_years, g.categories, g.languages, g.max_new_seekers_per_month,
+    select g.user_id, g.data, g.total_years, g.categories, g.max_new_seekers_per_month,
            ${simCol} as similarity
     from guide_profiles g
     join users u on u.id = g.user_id
@@ -80,7 +79,6 @@ export async function findCandidates(s: SeekerContext): Promise<Candidate[]> {
       and g.matching_paused = false
       and g.total_years >= ${f.minGuideYears}
       and ${f.category} = any(g.categories)
-      and g.languages && ${textArray(f.languages)}
       and (select count(*) from connection_requests cr
            where cr.guide_id = g.user_id and cr.status = 'approved' and cr.approved_at >= date_trunc('month', now())) < g.max_new_seekers_per_month
       and not exists (select 1 from blocks b where (b.blocker_id = ${s.userId} and b.blocked_id = g.user_id) or (b.blocker_id = g.user_id and b.blocked_id = ${s.userId}))
@@ -95,7 +93,6 @@ export async function findCandidates(s: SeekerContext): Promise<Candidate[]> {
     similarity: r.similarity === null ? null : Number(r.similarity),
     facts: {
       categories: r.categories,
-      languages: r.languages,
       totalYears: r.total_years,
       maxNewSeekersPerMonth: r.max_new_seekers_per_month,
     },

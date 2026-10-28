@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { authClient } from "@/lib/auth-client";
+import { safeNext } from "@/lib/safe-next";
 
 export function SignInForm({ next }: { next: string }) {
   const router = useRouter();
@@ -15,6 +16,7 @@ export function SignInForm({ next }: { next: string }) {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [target, setTarget] = useState(next);
   const codeRef = useRef<HTMLInputElement>(null);
 
   // The emailed link carries the address and code in the URL fragment (never sent to a server).
@@ -23,8 +25,10 @@ export function SignInForm({ next }: { next: string }) {
     const e = params.get("email");
     const c = params.get("code");
     if (e && c) {
+      const n = safeNext(params.get("next"));
       // One-time sync from the URL fragment, which does not exist during SSR.
       /* eslint-disable react-hooks/set-state-in-effect */
+      if (n) setTarget(n);
       setEmail(e);
       setCode(c);
       setStep("code");
@@ -41,7 +45,10 @@ export function SignInForm({ next }: { next: string }) {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const { error } = await authClient.emailOtp.sendVerificationOtp({ email: email.trim().toLowerCase(), type: "sign-in" });
+    const { error } = await authClient.emailOtp.sendVerificationOtp({ email: email.trim().toLowerCase(), type: "sign-in" },
+      // Lets the emailed link return the visitor to where they were going.
+      next !== "/dashboard" ? { headers: { "x-sign-in-next": next } } : undefined,
+    );
     setBusy(false);
     if (error) return setError(error.status === 429 ? "Too many attempts. Please wait a few minutes." : "Could not send the code. Check the address and try again.");
     setStep("code");
@@ -56,7 +63,7 @@ export function SignInForm({ next }: { next: string }) {
       setBusy(false);
       return setError(error.status === 429 ? "Too many attempts. Please wait a few minutes." : "That code is invalid or has expired.");
     }
-    router.replace(next);
+    router.replace(target);
     router.refresh();
   }
 

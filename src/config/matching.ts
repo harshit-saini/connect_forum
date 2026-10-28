@@ -2,12 +2,10 @@
 export const MATCHING = {
   /** Structured score components. They are re-normalised, so only their ratios matter. */
   structured: {
-    /** Share of the Seeker's languages the Guide speaks. */
-    language: 0.35,
     /** Years of experience, saturating at `experienceFullYears`. */
-    experience: 0.4,
+    experience: 0.6,
     /** A Guide who covers fewer categories counts as more focused. */
-    focus: 0.25,
+    focus: 0.4,
   },
   experienceFullYears: 15,
 

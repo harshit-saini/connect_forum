@@ -20,11 +20,11 @@ export const nextGuideMemberId = () => `G${process.env.TEST_MEMBER_PREFIX}${guid
 export const PHONE = "+919876543210";
 
 export type SeekerForm = {
-  alias: string; memberId: string; category: string; query: string; languages: string[]; totalYears: number; agree: boolean;
+  alias: string; memberId: string; category: string; query: string; totalYears: number; agree: boolean;
 };
 export type GuideForm = {
   alias: string; memberId: string; categories: string[]; jobTitle: string; totalYears: number; about: string;
-  languages: string[]; maxNewSeekersPerMonth: number; agree: boolean;
+  maxNewSeekersPerMonth: number; agree: boolean;
 };
 
 export const seekerForm = (over: Partial<SeekerForm> = {}): SeekerForm => ({
@@ -32,7 +32,6 @@ export const seekerForm = (over: Partial<SeekerForm> = {}): SeekerForm => ({
   memberId: nextSeekerMemberId(),
   category: "career_stagnation",
   query: "I have been in the same role for five years and do not know how to move up.",
-  languages: ["english", "hindi"],
   totalYears: 5,
   agree: true,
   ...over,
@@ -45,7 +44,6 @@ export const guideForm = (over: Partial<GuideForm> = {}): GuideForm => ({
   jobTitle: "Engineering manager",
   totalYears: 12,
   about: "I moved from engineer to manager and have mentored many people who felt stuck in their roles.",
-  languages: ["english", "hindi"],
   maxNewSeekersPerMonth: 3,
   agree: true,
   ...over,

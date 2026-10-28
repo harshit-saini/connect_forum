@@ -70,7 +70,7 @@ async function seedGuide(i: number) {
   const alias = `${ADJ[i % ADJ.length]}${NOUN[(i * 5) % NOUN.length]}${10 + i}`;
   const r = await saveProfile({
     userId: u.id, role: "guide", phone: `+9190000000${String(i + 1).padStart(2, "0")}`,
-    values: { alias, memberId: seedGuideId(i), categories: [...t.categories], jobTitle: t.title, totalYears: t.years, about: t.about, languages: ["english", "hindi"], maxNewSeekersPerMonth: 4, agree: true },
+    values: { alias, memberId: seedGuideId(i), categories: [...t.categories], jobTitle: t.title, totalYears: t.years, about: t.about, maxNewSeekersPerMonth: 4, agree: true },
   });
   if (!r.ok) throw new Error(`guide ${i + 1}: ${JSON.stringify(r.fieldErrors)}`);
   return true;
@@ -83,7 +83,7 @@ async function seedSeeker(i: number) {
   const alias = `${ADJ[(i + 3) % ADJ.length]}${NOUN[(i * 7 + 2) % NOUN.length]}${50 + i}`;
   const r = await saveProfile({
     userId: u.id, role: "seeker",
-    values: { alias, memberId: seedSeekerId(i), category: t.category, query: t.query, languages: ["english", "hindi"], totalYears: t.years, agree: true },
+    values: { alias, memberId: seedSeekerId(i), category: t.category, query: t.query, totalYears: t.years, agree: true },
   });
   if (!r.ok) throw new Error(`seeker ${i + 1}: ${JSON.stringify(r.fieldErrors)}`);
   return true;

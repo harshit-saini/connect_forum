@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CATEGORIES, LANGUAGES } from "@/config/taxonomy";
+import { CATEGORIES } from "@/config/taxonomy";
 import { MEMBER_ID_SHAPE, normalizeMemberId } from "@/lib/member-id";
 import { enumOf, freeText, years } from "./common";
 
@@ -18,9 +18,6 @@ const memberId = z
   .transform(normalizeMemberId)
   .pipe(z.string().min(1, "Enter your member ID").regex(MEMBER_ID_SHAPE, "That doesn't look like a member ID"));
 
-const languageValues = LANGUAGES.map((l) => l.value) as [string, ...string[]];
-const languages = z.array(z.enum(languageValues)).min(1, "Pick at least 1 language").max(6, "Pick at most 6 languages");
-
 /** One checkbox covers the Terms, Privacy policy and AI processing consents. */
 const agree = z.literal(true, { error: "Required to continue" });
 
@@ -30,7 +27,6 @@ export const seekerFormSchema = z.object({
   category: enumOf(CATEGORIES),
   /** The Seeker's question, in their own words. Screened for contact details. */
   query: freeText(20, 600),
-  languages,
   totalYears: years,
   agree,
 });
@@ -42,7 +38,6 @@ export const guideFormSchema = z.object({
   jobTitle: freeText(2, 80),
   totalYears: years,
   about: freeText(30, 500),
-  languages,
   maxNewSeekersPerMonth: z.number({ error: "Enter a number" }).int().min(1, "At least 1").max(10, "At most 10"),
   agree,
 });

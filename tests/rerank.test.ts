@@ -4,8 +4,8 @@ import { FoundryLlmProvider, FoundryOpenAILlmProvider, MockLlmProvider } from "@
 import { buildUserPrompt, parseRerank, rerank, SYSTEM_PROMPT } from "@/server/matching/rerank";
 import type { PublicGuide, PublicSeeker } from "@/server/matching/public";
 
-const seeker: PublicSeeker = { category: "Career Stagnation", question: "I want to move into product.", years: 3, languages: ["English"] };
-const guide = (title: string): PublicGuide => ({ title, years: 12, categories: ["Career Stagnation"], languages: ["English"], about: "Led product teams." });
+const seeker: PublicSeeker = { category: "Career Stagnation", question: "I want to move into product.", years: 3 };
+const guide = (title: string): PublicGuide => ({ title, years: 12, categories: ["Career Stagnation"], about: "Led product teams." });
 const candidates = [{ id: "c1", guide: guide("A") }, { id: "c2", guide: guide("B") }, { id: "c3", guide: guide("C") }];
 const ids = new Set(candidates.map((c) => c.id));
 

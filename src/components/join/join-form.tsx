@@ -7,7 +7,7 @@ import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { CheckboxField, MultiCheckField, NumberField, RadioField, TextAreaField, TextField } from "@/components/form/controls";
 import { AliasField, PhoneField } from "@/components/form/special";
-import { CATEGORIES, LANGUAGES } from "@/config/taxonomy";
+import { CATEGORIES } from "@/config/taxonomy";
 import { DEFAULT_COUNTRY } from "@/lib/countries";
 import { formSchema, normalizeEmpty, type Role } from "@/schemas";
 import { saveProfileAction } from "@/server/actions/profile";
@@ -34,7 +34,6 @@ export function JoinForm({
   const editing = memberId !== null;
   const form = useForm<FieldValues>({
     defaultValues: {
-      languages: ["english"],
       ...(role === "guide" ? { categories: [], maxNewSeekersPerMonth: 3 } : {}),
       ...initial,
       memberId: memberId ?? "",
@@ -104,7 +103,6 @@ export function JoinForm({
         )}
 
         <NumberField name="totalYears" label="Years of work experience" min={0} max={50} />
-        <MultiCheckField name="languages" label="Languages you speak" max={6} options={LANGUAGES} />
 
         {role === "guide" && (
           <>

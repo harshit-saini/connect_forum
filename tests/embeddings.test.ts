@@ -53,7 +53,7 @@ describe("embed_profile", () => {
 
     await processJobs({ maxMs: 20_000 });
     const [row] = await db().select().from(profileEmbeddings).where(eq(profileEmbeddings.userId, u.id));
-    expect(row).toMatchObject({ kind: "needs", model: "mock-hash-embedding", dimension: 1536, docTemplateVersion: 2, profileVersion: 1 });
+    expect(row).toMatchObject({ kind: "needs", model: "mock-hash-embedding", dimension: 1536, docTemplateVersion: 3, profileVersion: 1 });
     expect(row!.embedding).toHaveLength(1536);
 
     // Same document: no new vector, so updatedAt is untouched.

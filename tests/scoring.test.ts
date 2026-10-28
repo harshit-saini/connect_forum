@@ -1,19 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
-  bayesianRating, blend, experienceFit, focusFit, languageFit, normalizeRange, structuredScore,
+  bayesianRating, blend, experienceFit, focusFit, normalizeRange, structuredScore,
   type GuideFacts, type SeekerFacts,
 } from "@/server/matching/scoring";
 
-const seeker: SeekerFacts = { category: "career_stagnation", languages: ["english", "hindi"] };
-const guide: GuideFacts = { categories: ["career_stagnation"], languages: ["english", "hindi"], totalYears: 15, maxNewSeekersPerMonth: 4 };
+const seeker: SeekerFacts = { category: "career_stagnation" };
+const guide: GuideFacts = { categories: ["career_stagnation"], totalYears: 15, maxNewSeekersPerMonth: 4 };
 
-describe("language, experience and focus", () => {
-  it("counts the share of the seeker's languages the guide speaks", () => {
-    expect(languageFit(["english", "hindi"], ["english", "hindi", "tamil"])).toBe(1);
-    expect(languageFit(["english", "hindi"], ["english"])).toBe(0.5);
-    expect(languageFit(["english"], ["tamil"])).toBe(0);
-    expect(languageFit([], ["english"])).toBe(0);
-  });
+describe("experience and focus", () => {
   it("rewards experience up to a ceiling", () => {
     expect(experienceFit(0)).toBe(0);
     expect(experienceFit(7.5)).toBe(0.5);
@@ -31,13 +25,13 @@ describe("language, experience and focus", () => {
 describe("structuredScore", () => {
   it("is high for a strong fit and low for a poor one", () => {
     const good = structuredScore(seeker, guide).score;
-    const poor = structuredScore(seeker, { ...guide, categories: ["a", "b", "c", "d"], languages: ["tamil"], totalYears: 3 }).score;
+    const poor = structuredScore(seeker, { ...guide, categories: ["a", "b", "c", "d"], totalYears: 3 }).score;
     expect(good).toBe(1);
-    expect(poor).toBeLessThan(0.2);
+    expect(poor).toBeLessThan(0.3);
     expect(structuredScore(seeker, { ...guide, totalYears: 8 }).score).toBeLessThan(good);
   });
   it("exposes its parts for the score breakdown", () => {
-    expect(structuredScore(seeker, guide).parts).toEqual({ language: 1, experience: 1, focus: 1 });
+    expect(structuredScore(seeker, guide).parts).toEqual({ experience: 1, focus: 1 });
   });
 });
 

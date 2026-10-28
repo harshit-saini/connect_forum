@@ -117,7 +117,6 @@ export function genericExplanation(parts: StructuredParts, g: PublicGuide, seeke
   const bits: string[] = [];
   if (g.categories.includes(seekerCategory)) bits.push(`helps people with ${seekerCategory.toLowerCase()}`);
   if (parts.experience >= 0.5) bits.push(`has ${g.years} years of experience as ${g.title}`);
-  if (parts.language >= 1) bits.push("speaks your languages");
   if (bits.length === 0) bits.push(`brings ${g.years} years of experience as ${g.title}`);
   const sentence = `This Guide ${bits.slice(0, 3).join(", ")}.`;
   return sentence.replace(/, ([^,]*)\.$/, ", and $1.").replace(/^(.{1,200}).*$/, "$1");
