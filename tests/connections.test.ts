@@ -1,218 +1,318 @@
-import { and, desc, eq } from "drizzle-orm";
-import { beforeAll, describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
+import { and, count, desc, eq, or } from "drizzle-orm";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "@/server/db/client";
-import { auditLog, blocks, connectionRequests, counters, devOutbox, guideProfiles, jobs, matchRuns, matches, unlocks, users } from "@/server/db/schema";
-import { createRequest, decide, expireRequests, loadReview } from "@/server/connections/service";
-import { processJobs } from "@/server/jobs/worker";
-import { csrfFor, generateToken, hashToken, looksLikeToken, verifyCsrf } from "@/server/tokens";
-import { makeGuide, makeSeeker } from "./fixtures";
+import { auditLog, blocks, connectionRequests, devOutbox, guideProfiles, jobs, reports, unlocks, users } from "@/server/db/schema";
+import { closeLegacyPending, createRequest, listSeekerConnections } from "@/server/connections/service";
+import { queue } from "@/server/jobs";
+import { connectedPair, drainJobs, makeGuide, makeMatch, makePair, makeSeeker, PHONE } from "./fixtures";
 
 beforeAll(async () => {
   await db().delete(users);
   await db().delete(jobs); // a stale backlog would crowd the worker's batch
 });
-
-/** A seeker, a guide and a match row linking them (as a finished run would). */
-async function pair(opts: { mutateGuide?: Parameters<typeof makeGuide>[0] } = {}) {
-  const seeker = await makeSeeker();
-  const guide = await makeGuide(opts.mutateGuide);
-  const [run] = await db().insert(matchRuns).values({ seekerId: seeker.user.id, inputHash: "x", status: "done" }).returning();
-  const [match] = await db().insert(matches).values({ runId: run!.id, seekerId: seeker.user.id, guideId: guide.user.id, rank: 1, score: 0.9, explanation: "fits", status: "final" }).returning();
-  return { seeker, guide, match: match! };
-}
+afterEach(() => vi.restoreAllMocks());
 
 async function emailsTo(address: string) {
   return db().select().from(devOutbox).where(eq(devOutbox.to, address.toLowerCase())).orderBy(desc(devOutbox.createdAt));
 }
+const jobsFor = (requestId: string) => db().select().from(jobs).where(eq(jobs.idempotencyKey, `guide_details:${requestId}`));
 
-/** Creates a request and returns the raw token the Guide received by e-mail. */
-async function requestWithToken(p: Awaited<ReturnType<typeof pair>>, note?: string) {
-  const r = await createRequest({ seekerId: p.seeker.user.id, matchId: p.match.id, note });
-  if (!r.ok) throw new Error(JSON.stringify(r));
-  await processJobs({ maxMs: 20_000 });
-  const mail = (await emailsTo(p.guide.user.email))[0]!;
-  const token = /\/review\/([A-Za-z0-9_-]{43})/.exec(mail.text)![1]!;
-  return { requestId: r.requestId, token, mail };
-}
-
-describe("tokens", () => {
-  it("are 256-bit URL-safe strings hashed with SHA-256, and csrf is bound to the token", () => {
-    const t = generateToken();
-    expect(looksLikeToken(t)).toBe(true);
-    expect(hashToken(t)).toMatch(/^[0-9a-f]{64}$/);
-    expect(hashToken(t)).not.toContain(t);
-    expect(generateToken()).not.toBe(t);
-    const h = hashToken(t);
-    expect(verifyCsrf(h, csrfFor(h))).toBe(true);
-    expect(verifyCsrf(h, csrfFor(hashToken(generateToken())))).toBe(false);
-    expect(verifyCsrf(h, "")).toBe(false);
-  });
-});
-
-describe("creating a request", () => {
-  it("stores only a token hash, seals the token in the job, and e-mails the guide an anonymous summary", async () => {
-    const p = await pair();
+describe("connecting", () => {
+  it("records an approved connection, the unlock and the audit entries in one go", async () => {
+    const p = await makePair();
     const r = await createRequest({ seekerId: p.seeker.user.id, matchId: p.match.id, note: "I would love your view on moving into product." });
     if (!r.ok) throw new Error("expected ok");
 
     const [row] = await db().select().from(connectionRequests).where(eq(connectionRequests.id, r.requestId));
-    expect(row!.status).toBe("pending");
-    expect(row!.tokenHash).toMatch(/^[0-9a-f]{64}$/);
-    expect(row!.expiresAt.getTime()).toBeGreaterThan(Date.now() + 6.9 * 86_400_000);
-    expect(row!.expiresAt.getTime()).toBeLessThan(Date.now() + 7.1 * 86_400_000);
+    expect(row).toMatchObject({ status: "approved", seekerId: p.seeker.user.id, guideId: p.guide.user.id, matchId: p.match.id, note: "I would love your view on moving into product.", tokenHash: null, expiresAt: null });
+    expect(row!.approvedAt).toBeInstanceOf(Date);
+    expect(Math.abs(row!.approvedAt!.getTime() - Date.now())).toBeLessThan(60_000);
 
-    const [job] = await db().select().from(jobs).where(eq(jobs.idempotencyKey, `req_email:${r.requestId}`));
-    // Sealed (AES-GCM parts), not a raw token or link.
-    expect(Object.keys(job!.payload).sort()).toEqual(["kind", "requestId", "sealedToken", "userId"]);
-    expect(Object.keys(JSON.parse(String(job!.payload.sealedToken))).sort()).toEqual(["c", "i", "t", "v"]);
-    expect(JSON.stringify(job!.payload)).not.toContain("/review/");
+    const ul = await db().select().from(unlocks).where(and(eq(unlocks.seekerId, p.seeker.user.id), eq(unlocks.guideId, p.guide.user.id)));
+    expect(ul).toHaveLength(1);
+    expect(ul[0]!.connectionRequestId).toBe(r.requestId);
 
-    await processJobs({ maxMs: 20_000 });
-    const [mail] = await emailsTo(p.guide.user.email);
-    const token = /\/review\/([A-Za-z0-9_-]{43})/.exec(mail!.text)![1]!;
-    expect(hashToken(token)).toBe(row!.tokenHash);
-    expect(mail!.text).toMatch(/Category: Career Stagnation/);
-    expect(mail!.text).toContain(p.seeker.form.query);
-    for (const secret of [p.seeker.user.email, "9876543210"]) expect(mail!.text).not.toContain(secret);
+    const actions = (await db().select().from(auditLog).where(eq(auditLog.subjectId, r.requestId))).map((a) => a.action);
+    expect(actions.sort()).toEqual(["connection.approved", "connection.requested"]);
+    expect((await db().select().from(auditLog).where(eq(auditLog.subjectId, ul[0]!.id))).map((a) => a.action)).toEqual(["unlock.created"]);
 
-    // The raw token no longer exists anywhere in the job row once the e-mail is out.
-    const [after] = await db().select().from(jobs).where(eq(jobs.id, job!.id));
-    expect(JSON.stringify(after!.payload)).not.toContain("sealedToken");
-    const [{ payload }] = await db().select({ payload: jobs.payload }).from(jobs).where(eq(jobs.id, job!.id));
-    expect(JSON.stringify(payload)).not.toContain(token);
+    // Both e-mails and the rating reminder are queued with the connection, ids only.
+    const queued = await db().select().from(jobs).where(or(eq(jobs.idempotencyKey, `guide_details:${r.requestId}`), eq(jobs.idempotencyKey, `guide_notified:${r.requestId}`), eq(jobs.idempotencyKey, `rating_reminder:${r.requestId}`)));
+    expect(queued.map((j) => j.type).sort()).toEqual(["rating_reminder", "send_email", "send_email"]);
+    const reminder = queued.find((j) => j.type === "rating_reminder")!;
+    expect(reminder.runAt.getTime()).toBeGreaterThan(Date.now() + 2.9 * 86_400_000); // RATING_DELAY_DAYS defaults to 3
   });
 
-  it("rejects notes with contact details and enforces ownership, duplicates and the pending cap", async () => {
-    const p = await pair();
+  it("leaves nothing behind when queueing fails part-way (atomic)", async () => {
+    const p = await makePair();
+    const q = queue();
+    const real = q.enqueue.bind(q);
+    let calls = 0;
+    vi.spyOn(q, "enqueue").mockImplementation(async (...args) => {
+      if (++calls === 2) throw new Error("queue down");
+      return real(...args);
+    });
+    await expect(createRequest({ seekerId: p.seeker.user.id, matchId: p.match.id })).rejects.toThrow("queue down");
+    expect(await db().select().from(connectionRequests).where(eq(connectionRequests.seekerId, p.seeker.user.id))).toHaveLength(0);
+    expect(await db().select().from(unlocks).where(eq(unlocks.seekerId, p.seeker.user.id))).toHaveLength(0);
+    expect(await db().select().from(auditLog).where(eq(auditLog.actorId, p.seeker.user.id))).toHaveLength(0);
+    vi.restoreAllMocks();
+    expect((await createRequest({ seekerId: p.seeker.user.id, matchId: p.match.id })).ok).toBe(true); // a retry works
+  });
+
+  it("rejects notes with contact details and enforces ownership and duplicates", async () => {
+    const p = await makePair();
     expect(await createRequest({ seekerId: p.seeker.user.id, matchId: p.match.id, note: "call me on 98765 43210" })).toMatchObject({ ok: false, code: "note" });
+    expect(await db().select().from(connectionRequests).where(eq(connectionRequests.seekerId, p.seeker.user.id))).toHaveLength(0);
     const other = await makeSeeker();
     expect(await createRequest({ seekerId: other.user.id, matchId: p.match.id })).toMatchObject({ ok: false, code: "not_found" });
 
     expect((await createRequest({ seekerId: p.seeker.user.id, matchId: p.match.id })).ok).toBe(true);
     expect(await createRequest({ seekerId: p.seeker.user.id, matchId: p.match.id })).toMatchObject({ ok: false, code: "duplicate" });
-
-    // cap of 3 pending (MAX_PENDING_REQUESTS default)
-    const s = await makeSeeker();
-    for (let i = 0; i < 3; i++) {
-      const g = await makeGuide();
-      const [run] = await db().insert(matchRuns).values({ seekerId: s.user.id, inputHash: `c${i}`, status: "done" }).returning();
-      const [m] = await db().insert(matches).values({ runId: run!.id, seekerId: s.user.id, guideId: g.user.id, rank: 1, score: 0.5, status: "final" }).returning();
-      expect((await createRequest({ seekerId: s.user.id, matchId: m!.id })).ok).toBe(true);
-    }
-    const g4 = await makeGuide();
-    const [run4] = await db().insert(matchRuns).values({ seekerId: s.user.id, inputHash: "c4", status: "done" }).returning();
-    const [m4] = await db().insert(matches).values({ runId: run4!.id, seekerId: s.user.id, guideId: g4.user.id, rank: 1, score: 0.5, status: "final" }).returning();
-    expect(await createRequest({ seekerId: s.user.id, matchId: m4!.id })).toMatchObject({ ok: false, code: "limit" });
   });
 
-  it("refuses unavailable guides (paused, suspended, blocked)", async () => {
-    const paused = await pair();
+  it("has no pending cap: a Seeker can connect with any number of Guides", async () => {
+    const s = await makeSeeker();
+    for (let i = 0; i < 5; i++) {
+      const g = await makeGuide();
+      const m = await makeMatch(s.user.id, g.user.id);
+      expect((await createRequest({ seekerId: s.user.id, matchId: m.id })).ok, `connection ${i}`).toBe(true);
+    }
+    expect((await listSeekerConnections(s.user.id)).filter((c) => c.status === "approved")).toHaveLength(5);
+  });
+
+  it("creates exactly one connection and one e-mail pair for simultaneous calls (double click, two tabs)", async () => {
+    const p = await makePair();
+    const results = await Promise.all(Array.from({ length: 6 }, () => createRequest({ seekerId: p.seeker.user.id, matchId: p.match.id })));
+    expect(results.filter((r) => r.ok)).toHaveLength(1);
+    expect(results.filter((r) => !r.ok).every((r) => !r.ok && r.code === "duplicate")).toBe(true);
+
+    const rows = await db().select().from(connectionRequests).where(eq(connectionRequests.seekerId, p.seeker.user.id));
+    expect(rows).toHaveLength(1);
+    expect(await db().select().from(unlocks).where(eq(unlocks.seekerId, p.seeker.user.id))).toHaveLength(1);
+    const id = rows[0]!.id;
+    expect(await db().select().from(jobs).where(eq(jobs.idempotencyKey, `guide_details:${id}`))).toHaveLength(1);
+    expect(await db().select().from(jobs).where(eq(jobs.idempotencyKey, `guide_notified:${id}`))).toHaveLength(1);
+
+    await drainJobs();
+    expect((await emailsTo(p.seeker.user.email)).filter((m) => m.subject === "Your Guide's details")).toHaveLength(1);
+    expect((await emailsTo(p.guide.user.email)).filter((m) => m.subject === "A Seeker has been given your details")).toHaveLength(1);
+  });
+
+  it("refuses unavailable guides (paused, suspended, deleted, not finished, blocked, reported)", async () => {
+    const paused = await makePair();
     await db().update(guideProfiles).set({ matchingPaused: true }).where(eq(guideProfiles.userId, paused.guide.user.id));
     expect(await createRequest({ seekerId: paused.seeker.user.id, matchId: paused.match.id })).toMatchObject({ ok: false, code: "unavailable" });
 
-    const suspended = await pair();
+    const suspended = await makePair();
     await db().update(users).set({ suspendedAt: new Date() }).where(eq(users.id, suspended.guide.user.id));
     expect(await createRequest({ seekerId: suspended.seeker.user.id, matchId: suspended.match.id })).toMatchObject({ ok: false, code: "unavailable" });
 
-    const blocked = await pair();
-    await db().insert(blocks).values({ blockerId: blocked.guide.user.id, blockedId: blocked.seeker.user.id });
-    expect(await createRequest({ seekerId: blocked.seeker.user.id, matchId: blocked.match.id })).toMatchObject({ ok: false, code: "unavailable" });
+    const deleted = await makePair();
+    await db().update(users).set({ deletedAt: new Date() }).where(eq(users.id, deleted.guide.user.id));
+    expect(await createRequest({ seekerId: deleted.seeker.user.id, matchId: deleted.match.id })).toMatchObject({ ok: false, code: "unavailable" });
+
+    const unfinished = await makePair();
+    await db().update(guideProfiles).set({ profileCompletedAt: null }).where(eq(guideProfiles.userId, unfinished.guide.user.id));
+    expect(await createRequest({ seekerId: unfinished.seeker.user.id, matchId: unfinished.match.id })).toMatchObject({ ok: false, code: "unavailable" });
+
+    const blockedByGuide = await makePair();
+    await db().insert(blocks).values({ blockerId: blockedByGuide.guide.user.id, blockedId: blockedByGuide.seeker.user.id });
+    expect(await createRequest({ seekerId: blockedByGuide.seeker.user.id, matchId: blockedByGuide.match.id })).toMatchObject({ ok: false, code: "unavailable" });
+
+    const blockedBySeeker = await makePair();
+    await db().insert(blocks).values({ blockerId: blockedBySeeker.seeker.user.id, blockedId: blockedBySeeker.guide.user.id });
+    expect(await createRequest({ seekerId: blockedBySeeker.seeker.user.id, matchId: blockedBySeeker.match.id })).toMatchObject({ ok: false, code: "unavailable" });
+
+    const reported = await makePair();
+    await db().insert(reports).values({ reporterId: reported.seeker.user.id, reportedId: reported.guide.user.id, reason: "harassment" });
+    expect(await createRequest({ seekerId: reported.seeker.user.id, matchId: reported.match.id })).toMatchObject({ ok: false, code: "unavailable" });
+
+    for (const p of [paused, suspended, deleted, unfinished, blockedByGuide, blockedBySeeker, reported]) {
+      expect(await db().select().from(connectionRequests).where(eq(connectionRequests.seekerId, p.seeker.user.id))).toHaveLength(0);
+      expect(await db().select().from(unlocks).where(eq(unlocks.seekerId, p.seeker.user.id))).toHaveLength(0);
+    }
   });
 });
 
-describe("reviewing and deciding", () => {
-  it("opening the link (GET) never consumes it, and shows only anonymous details", async () => {
-    const p = await pair();
-    const { token, requestId } = await requestWithToken(p, "Hello, I admire your path.");
-    for (let i = 0; i < 3; i++) {
-      const review = await loadReview(token);
-      expect(review.state).toBe("open");
-    }
-    const review = await loadReview(token);
-    if (review.state !== "open") throw new Error("expected open");
-    expect(JSON.stringify(review)).not.toMatch(/@example\.com|9876543210|Acme/);
-    expect(review.note).toBe("Hello, I admire your path.");
-    const [r] = await db().select().from(connectionRequests).where(eq(connectionRequests.id, requestId));
-    expect(r!.status).toBe("pending");
-    expect(r!.tokenUsedAt).toBeNull();
-    expect(await loadReview("not-a-token")).toEqual({ state: "invalid" });
-    expect(await loadReview(generateToken())).toEqual({ state: "invalid" });
-  });
-
-  it("approving creates one unlock, audit entries, a pool bump, and an approved e-mail without the number", async () => {
-    const p = await pair();
-    const { token, requestId } = await requestWithToken(p);
-    const before = (await db().select().from(counters).where(eq(counters.name, "guide_pool_version")))[0]?.value ?? 0;
-
-    expect(await decide(token, "approve")).toEqual({ ok: true, outcome: "approved" });
-    const [r] = await db().select().from(connectionRequests).where(eq(connectionRequests.id, requestId));
-    expect(r).toMatchObject({ status: "approved" });
-    expect(r!.approvedAt).toBeInstanceOf(Date);
-    expect(r!.tokenUsedAt).toBeInstanceOf(Date);
-
-    const ul = await db().select().from(unlocks).where(and(eq(unlocks.seekerId, p.seeker.user.id), eq(unlocks.guideId, p.guide.user.id)));
-    expect(ul).toHaveLength(1);
-    const actions = (await db().select().from(auditLog).where(eq(auditLog.subjectId, requestId))).map((a) => a.action);
-    expect(actions).toEqual(expect.arrayContaining(["connection.requested", "connection.approved"]));
-    expect((await db().select().from(auditLog).where(eq(auditLog.subjectId, ul[0]!.id))).map((a) => a.action)).toEqual(["unlock.created"]);
-    expect((await db().select().from(counters).where(eq(counters.name, "guide_pool_version")))[0]!.value).toBe(before + 1);
-
-    await processJobs({ maxMs: 20_000 });
-    const [mail] = await emailsTo(p.seeker.user.email).then((m) => m.filter((x) => x.subject.includes("approved")));
+describe("the e-mail to the Seeker", () => {
+  it("has the Guide's public details and their phone number when one is on file", async () => {
+    const p = await connectedPair();
+    const mail = (await emailsTo(p.seeker.user.email)).find((m) => m.subject === "Your Guide's details")!;
     expect(mail).toBeDefined();
-    expect(mail!.text.replace(/https?:\/\/\S+/g, "")).not.toMatch(/\+?\d[\d\s-]{8,}\d/); // no phone number anywhere
-    expect(mail!.text).not.toContain("98765");
-    expect(mail!.text).toContain(`/seeker/connections/${requestId}`);
-
-    // single use
-    expect(await decide(token, "approve")).toMatchObject({ ok: false, code: "answered" });
-    expect(await decide(token, "decline")).toMatchObject({ ok: false, code: "answered" });
+    expect(mail.text).toContain(p.guide.form.jobTitle);
+    expect(mail.text).toMatch(/12 years/);
+    expect(mail.text).toMatch(/Career Stagnation/);
+    expect(mail.text).toContain(p.guide.form.about);
+    expect(mail.text).toContain(PHONE);
+    expect(mail.text).toContain(`/seeker/connections/${p.requestId}`);
+    expect(mail.text).not.toContain(p.guide.user.email); // the Guide's address is never shared
   });
 
-  it("declining sends a generic e-mail that does not name the guide", async () => {
-    const p = await pair();
-    const { token } = await requestWithToken(p);
-    expect(await decide(token, "decline")).toEqual({ ok: true, outcome: "declined" });
-    expect(await db().select().from(unlocks).where(eq(unlocks.seekerId, p.seeker.user.id))).toHaveLength(0);
-    await processJobs({ maxMs: 20_000 });
-    const mail = (await emailsTo(p.seeker.user.email)).find((m) => m.subject.includes("update on your request"))!;
-    expect(mail.text).toMatch(/other matches/i);
-    expect(mail.text).not.toContain(p.guide.form.alias);
+  it("says plainly that there is no number, and does not include one, when the Guide gave none", async () => {
+    const p = await connectedPair({ phone: null });
+    const mail = (await emailsTo(p.seeker.user.email)).find((m) => m.subject === "Your Guide's details")!;
+    expect(mail).toBeDefined();
+    expect(mail.text).toContain(p.guide.form.jobTitle);
+    expect(mail.text).toContain("didn't share a phone number");
+    expect(mail.text).toMatch(/can't contact them directly/);
+    expect(mail.text.replace(/https?:\/\/\S+/g, "")).not.toMatch(/\+?\d[\d\s-]{8,}\d/);
   });
 
-  it("lets exactly one of several simultaneous decisions win", async () => {
-    const p = await pair();
-    const { token } = await requestWithToken(p);
-    const results = await Promise.all([decide(token, "approve"), decide(token, "approve"), decide(token, "decline"), decide(token, "approve")]);
-    expect(results.filter((r) => r.ok)).toHaveLength(1);
-    expect((await db().select().from(unlocks).where(eq(unlocks.seekerId, p.seeker.user.id))).length).toBeLessThanOrEqual(1);
+  it("uses the number on file when the e-mail is sent, not when the Seeker connected", async () => {
+    const p = await makePair();
+    const r = await createRequest({ seekerId: p.seeker.user.id, matchId: p.match.id });
+    if (!r.ok) throw new Error("x");
+    const { phoneVault } = await import("@/server/db/schema");
+    await db().delete(phoneVault).where(eq(phoneVault.guideId, p.guide.user.id)); // the Guide removed it in between
+    await drainJobs();
+    const mail = (await emailsTo(p.seeker.user.email)).find((m) => m.subject === "Your Guide's details")!;
+    expect(mail.text).not.toContain(PHONE);
+    expect(mail.text).toMatch(/can't contact them directly/);
   });
 
-  it("rejects expired links and expires pending requests with a notification", async () => {
-    const p = await pair();
-    const { token, requestId } = await requestWithToken(p);
-    await db().update(connectionRequests).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(connectionRequests.id, requestId));
-    expect(await loadReview(token)).toEqual({ state: "expired" });
-    expect(await decide(token, "approve")).toMatchObject({ ok: false, code: "expired" });
-    expect(await expireRequests()).toBeGreaterThanOrEqual(1);
-    expect(await expireRequests()).toBe(0); // idempotent
-    const [r] = await db().select().from(connectionRequests).where(eq(connectionRequests.id, requestId));
-    expect(r!.status).toBe("expired");
-    await processJobs({ maxMs: 20_000 });
-    expect((await emailsTo(p.seeker.user.email)).some((m) => m.subject.includes("wasn't answered in time"))).toBe(true);
+  it("never puts a phone number or an e-mail address in a job row", async () => {
+    const p = await makePair();
+    const r = await createRequest({ seekerId: p.seeker.user.id, matchId: p.match.id, note: "Hello" });
+    if (!r.ok) throw new Error("x");
+    const check = async () => {
+      const rows = await db().select().from(jobs).where(or(eq(jobs.idempotencyKey, `guide_details:${r.requestId}`), eq(jobs.idempotencyKey, `guide_notified:${r.requestId}`), eq(jobs.idempotencyKey, `rating_reminder:${r.requestId}`)));
+      expect(rows).toHaveLength(3);
+      for (const j of rows) {
+        const payload = JSON.stringify(j.payload);
+        expect(Object.keys(j.payload).every((k) => ["kind", "userId", "requestId"].includes(k)), payload).toBe(true);
+        for (const secret of ["9876543210", "98765", p.guide.user.email, p.seeker.user.email, "@"]) expect(payload).not.toContain(secret);
+        expect(`${j.lastError ?? ""}`).not.toContain("9876543210");
+      }
+    };
+    await check(); // queued
+    await drainJobs();
+    await check(); // and after they have run
+    expect((await emailsTo(p.seeker.user.email)).some((m) => m.text.includes(PHONE))).toBe(true);
   });
 
-  it("will not approve for a suspended guide or beyond the guide's monthly capacity", async () => {
-    const s = await pair();
-    const { token: t1 } = await requestWithToken(s);
-    await db().update(users).set({ suspendedAt: new Date() }).where(eq(users.id, s.guide.user.id));
-    expect(await decide(t1, "approve")).toMatchObject({ ok: false, code: "unavailable" });
+  it("is not sent when the Guide was suspended, or either side blocked the other, since connecting", async () => {
+    const suspended = await makePair();
+    const a = await createRequest({ seekerId: suspended.seeker.user.id, matchId: suspended.match.id });
+    if (!a.ok) throw new Error("x");
+    await db().update(users).set({ suspendedAt: new Date() }).where(eq(users.id, suspended.guide.user.id));
 
-    const c = await pair({ mutateGuide: { maxNewSeekersPerMonth: 1 } });
-    const { token: t2 } = await requestWithToken(c);
-    const second = await makeSeeker();
-    await db().insert(connectionRequests).values({ seekerId: second.user.id, guideId: c.guide.user.id, status: "approved", approvedAt: new Date(), tokenHash: generateToken(), expiresAt: new Date(Date.now() + 1e9) });
-    expect(await decide(t2, "approve")).toMatchObject({ ok: false, code: "capacity" });
-    expect(await decide(t2, "decline")).toEqual({ ok: true, outcome: "declined" }); // declining is always possible
+    const blocked = await makePair();
+    const b = await createRequest({ seekerId: blocked.seeker.user.id, matchId: blocked.match.id });
+    if (!b.ok) throw new Error("x");
+    await db().insert(blocks).values({ blockerId: blocked.guide.user.id, blockedId: blocked.seeker.user.id });
+
+    const blockedBySeeker = await makePair();
+    const c = await createRequest({ seekerId: blockedBySeeker.seeker.user.id, matchId: blockedBySeeker.match.id });
+    if (!c.ok) throw new Error("x");
+    await db().insert(blocks).values({ blockerId: blockedBySeeker.seeker.user.id, blockedId: blockedBySeeker.guide.user.id });
+
+    await drainJobs();
+    for (const p of [suspended, blocked, blockedBySeeker]) {
+      expect(await emailsTo(p.seeker.user.email)).toHaveLength(0);
+      expect(await emailsTo(p.guide.user.email)).toHaveLength(0);
+    }
+  });
+
+  it("is sent once even when the job is run twice", async () => {
+    const p = await makePair();
+    const r = await createRequest({ seekerId: p.seeker.user.id, matchId: p.match.id });
+    if (!r.ok) throw new Error("x");
+    await drainJobs();
+    await drainJobs();
+    expect((await emailsTo(p.seeker.user.email)).filter((m) => m.subject === "Your Guide's details")).toHaveLength(1);
+    expect(await jobsFor(r.requestId)).toHaveLength(1);
+  });
+});
+
+describe("the e-mail to the Guide", () => {
+  it("has the Seeker's category and question, and no contact details", async () => {
+    const p = await connectedPair({ note: "I admire your path." });
+    const mail = (await emailsTo(p.guide.user.email)).find((m) => m.subject === "A Seeker has been given your details")!;
+    expect(mail).toBeDefined();
+    expect(mail.text).toMatch(/Category: Career Stagnation/);
+    expect(mail.text).toContain(p.seeker.form.query);
+    expect(mail.text).toContain("I admire your path.");
+    expect(mail.text).toMatch(/including your phone number/);
+    expect(mail.text).not.toMatch(/\/review\//); // no link to act on
+    for (const secret of [p.seeker.user.email, p.seeker.form.memberId, PHONE, "9876543210"]) expect(mail.text).not.toContain(secret);
+  });
+
+  it("says no number was shared when the Guide has none", async () => {
+    const p = await connectedPair({ phone: null });
+    const mail = (await emailsTo(p.guide.user.email)).find((m) => m.subject === "A Seeker has been given your details")!;
+    expect(mail.text).not.toMatch(/including your phone number/);
+    expect(mail.text).toMatch(/didn't provide a phone number/);
+  });
+});
+
+describe("listing and legacy rows", () => {
+  it("lists the Seeker's connections, newest first", async () => {
+    const p = await connectedPair();
+    const list = await listSeekerConnections(p.seeker.user.id);
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ id: p.requestId, status: "approved" });
+  });
+
+  it("closes requests left pending by the old approval flow, once", async () => {
+    const seeker = await makeSeeker();
+    const guide = await makeGuide();
+    const [old] = await db().insert(connectionRequests).values({ seekerId: seeker.user.id, guideId: guide.user.id, status: "pending", tokenHash: randomUUID(), expiresAt: new Date() }).returning();
+    expect(await closeLegacyPending()).toBeGreaterThanOrEqual(1);
+    expect((await db().select().from(connectionRequests).where(eq(connectionRequests.id, old!.id)))[0]!.status).toBe("cancelled");
+    expect(await closeLegacyPending()).toBe(0);
+    const [{ n }] = await db().select({ n: count() }).from(connectionRequests).where(eq(connectionRequests.status, "pending"));
+    expect(n).toBe(0);
+  });
+});
+
+describe("what is sent, and when", () => {
+  it("does not send a number that was saved before e-mailing it was part of the deal", async () => {
+    const { phoneVault } = await import("@/server/db/schema");
+    const { revealNumber } = await import("@/server/connections/reveal");
+    const p = await makePair();
+    await db().update(phoneVault).set({ emailConsentAt: null }).where(eq(phoneVault.guideId, p.guide.user.id));
+    const r = await createRequest({ seekerId: p.seeker.user.id, matchId: p.match.id });
+    if (!r.ok) throw new Error("expected ok");
+    await drainJobs();
+    const mail = (await emailsTo(p.seeker.user.email)).find((m) => m.subject === "Your Guide's details")!;
+    expect(mail.text).toContain("didn't share a phone number");
+    expect(mail.text).not.toContain(PHONE);
+    expect(await revealNumber({ seekerId: p.seeker.user.id, connectionId: r.requestId })).toMatchObject({ ok: false, code: "unavailable" });
+  });
+
+  it("sends nothing if a report is filed, or the Seeker is suspended, before the e-mails go out", async () => {
+    const reported = await makePair();
+    const r1 = await createRequest({ seekerId: reported.seeker.user.id, matchId: reported.match.id });
+    if (!r1.ok) throw new Error("expected ok");
+    await db().insert(reports).values({ reporterId: reported.seeker.user.id, reportedId: reported.guide.user.id, reason: "spam" });
+    const suspended = await makePair();
+    const r2 = await createRequest({ seekerId: suspended.seeker.user.id, matchId: suspended.match.id });
+    if (!r2.ok) throw new Error("expected ok");
+    await db().update(users).set({ suspendedAt: new Date() }).where(eq(users.id, suspended.seeker.user.id));
+    await drainJobs();
+    expect(await emailsTo(reported.seeker.user.email)).toHaveLength(0);
+    expect(await emailsTo(reported.guide.user.email)).toHaveLength(0);
+    expect((await emailsTo(suspended.guide.user.email)).filter((m) => m.subject === "A Seeker has been given your details")).toHaveLength(0);
+  });
+
+  it("audits that a number was e-mailed (ids and a flag only)", async () => {
+    const p = await connectedPair();
+    const rows = await db().select().from(auditLog).where(and(eq(auditLog.action, "phone.emailed"), eq(auditLog.subjectId, p.requestId)));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ actorId: p.seeker.user.id, targetId: p.guide.user.id, metadata: { included: true } });
+    expect(JSON.stringify(rows[0])).not.toContain("9876543210");
+  });
+
+  it("quietly drops e-mail jobs left over from the old approval flow", async () => {
+    const { processJobs } = await import("@/server/jobs/worker");
+    const p = await makePair();
+    for (const kind of ["connection_request", "request_approved", "request_declined", "request_expired"]) {
+      await queue().enqueue(db(), "send_email", { kind, userId: p.seeker.user.id, requestId: randomUUID() }, { idempotencyKey: `legacy:${randomUUID()}` });
+    }
+    await processJobs({ maxMs: 20_000, maxJobs: 100 });
+    const left = await db().select().from(jobs).where(and(eq(jobs.type, "send_email"), eq(jobs.status, "failed")));
+    expect(left.filter((j) => String((j.payload as { userId?: string }).userId) === p.seeker.user.id)).toHaveLength(0);
   });
 });

@@ -22,6 +22,7 @@ export async function savePhone(tx: Pick<Db, "insert">, guideId: string, e164: s
     tag: sealed.tag,
     keyVersion: sealed.keyVersion,
     last4: e164.slice(-4),
+    emailConsentAt: new Date(), // saved through the form that says it is emailed to connecting Seekers
   };
   await tx
     .insert(phoneVault)
@@ -29,7 +30,13 @@ export async function savePhone(tx: Pick<Db, "insert">, guideId: string, e164: s
     .onConflictDoUpdate({ target: phoneVault.guideId, set: { ...values, updatedAt: new Date() } });
 }
 
+/** Removes a Guide's saved number (the vault row). E-mails already sent are out of our hands. */
+export async function deletePhone(tx: Pick<Db, "delete">, guideId: string) {
+  await tx.delete(phoneVault).where(eq(phoneVault.guideId, guideId));
+}
+
 export async function phoneStatus(db: Pick<Db, "select">, guideId: string): Promise<{ has: boolean; last4: string | null }> {
-  const [row] = await db.select({ last4: phoneVault.last4 }).from(phoneVault).where(eq(phoneVault.guideId, guideId));
-  return { has: Boolean(row), last4: row?.last4 ?? null };
+  const [row] = await db.select({ last4: phoneVault.last4, consent: phoneVault.emailConsentAt }).from(phoneVault).where(eq(phoneVault.guideId, guideId));
+  // A number without consent (saved under the old promise) counts as "not given": the Guide is asked to re-enter it.
+  return row?.consent ? { has: true, last4: row.last4 } : { has: false, last4: null };
 }

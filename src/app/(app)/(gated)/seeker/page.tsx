@@ -25,7 +25,7 @@ export default async function SeekerDashboard() {
     <div className="space-y-8">
       <div className="flex items-baseline justify-between">
         <h1 className="text-3xl font-semibold">Seeker dashboard</h1>
-        <nav aria-label="Seeker" className="flex gap-4 text-sm"><Link href="/seeker/connections" className="underline">My requests</Link><Link href="/profile" className="underline">My profile</Link></nav>
+        <nav aria-label="Seeker" className="flex gap-4 text-sm"><Link href="/seeker/connections" className="underline">My connections</Link><Link href="/profile" className="underline">My profile</Link></nav>
       </div>
       {/* Seekers who haven't searched yet see the FAQs for their category first. */}
       {category && !initial ? (

@@ -8,7 +8,6 @@ export type SeekerFacts = {
 export type GuideFacts = {
   categories: string[];
   totalYears: number;
-  maxNewSeekersPerMonth: number;
 };
 
 export type StructuredParts = {

@@ -16,7 +16,7 @@ function lines(entries: Array<[string, string | undefined]>): string {
 }
 
 /**
- * Deterministic text for a Seeker. Deliberately excludes the alias, member ID and consents. The question
+ * Deterministic text for a Seeker. Deliberately excludes any name, member ID and consents. The question
  * is included verbatim (it is screened for contact details on input) and is treated as data by the model.
  */
 export function buildNeedsDoc(d: SeekerProfileData): string {
@@ -27,7 +27,7 @@ export function buildNeedsDoc(d: SeekerProfileData): string {
   ]);
 }
 
-/** Deterministic text for a Guide. Excludes alias, member ID, phone and other private fields. */
+/** Deterministic text for a Guide. Excludes member ID, phone and other private fields. */
 export function buildOffersDoc(d: GuideProfileData): string {
   return lines([
     ["Categories", d.categories.map((c) => labelOf(CATEGORIES, c)).join(", ")],

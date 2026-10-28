@@ -1,11 +1,11 @@
 import "server-only";
 import { and, desc, eq, or, sql } from "drizzle-orm";
-import { aliasedTable } from "drizzle-orm";
+import { guideDisplayName, seekerDisplayName } from "@/lib/display";
 import { audit } from "@/server/audit";
 import { db } from "@/server/db/client";
 import {
   auditLog, blocks, connectionRequests, guideProfiles, matches, phoneVault, profileDrafts, profileEmbeddings, ratings, reports,
-  seekerProfiles, userAliases, userRoles, users,
+  seekerProfiles, userRoles, users,
 } from "@/server/db/schema";
 import { bumpCounter, GUIDE_POOL_VERSION, RATINGS_VERSION } from "@/server/profile/counters";
 import { guideRatingSummary } from "@/server/ratings/service";
@@ -19,50 +19,57 @@ export async function buildExport(userId: string) {
   const [user] = await db().select().from(users).where(eq(users.id, userId));
   if (!user) return null;
   const [role] = await db().select().from(userRoles).where(eq(userRoles.userId, userId));
-  const [alias] = await db().select().from(userAliases).where(eq(userAliases.userId, userId));
-  const [seeker] = await db().select().from(seekerProfiles).where(eq(seekerProfiles.userId, userId));
-  const [guide] = await db().select().from(guideProfiles).where(eq(guideProfiles.userId, userId));
+  const [seekerRow] = await db().select().from(seekerProfiles).where(eq(seekerProfiles.userId, userId));
+  const [guideRow] = await db().select().from(guideProfiles).where(eq(guideProfiles.userId, userId));
   const [draft] = await db().select().from(profileDrafts).where(eq(profileDrafts.userId, userId));
   const [vault] = await db().select({ last4: phoneVault.last4 }).from(phoneVault).where(eq(phoneVault.guideId, userId));
 
-  const other = aliasedTable(userAliases, "other_alias");
-  const requests = await db()
-    .select({ seekerId: connectionRequests.seekerId, status: connectionRequests.status, note: connectionRequests.note, createdAt: connectionRequests.createdAt, decidedAt: connectionRequests.decidedAt, otherAlias: other.alias })
+  // The profile that belongs to the account's role (a switched account can leave an abandoned row of the other kind).
+  const seeker = role?.role === "seeker" ? seekerRow : undefined;
+  const guide = role?.role === "guide" ? guideRow : undefined;
+  const stripLegacy = (data: Record<string, unknown> | undefined) => (data ? Object.fromEntries(Object.entries(data).filter(([k]) => k !== "alias")) : null);
+
+  // Counterparts appear only by their public profile (role title / "Seeker · category"), never by name, email, member ID or phone.
+  const requestRows = await db()
+    .select({ seekerId: connectionRequests.seekerId, status: connectionRequests.status, note: connectionRequests.note, createdAt: connectionRequests.createdAt, decidedAt: connectionRequests.decidedAt, guideData: guideProfiles.data, seekerData: seekerProfiles.data })
     .from(connectionRequests)
-    .leftJoin(other, eq(other.userId, sql`case when ${connectionRequests.seekerId} = ${userId} then ${connectionRequests.guideId} else ${connectionRequests.seekerId} end`))
+    .leftJoin(guideProfiles, eq(guideProfiles.userId, connectionRequests.guideId))
+    .leftJoin(seekerProfiles, eq(seekerProfiles.userId, connectionRequests.seekerId))
     .where(or(eq(connectionRequests.seekerId, userId), eq(connectionRequests.guideId, userId)))
     .orderBy(desc(connectionRequests.createdAt));
 
-  const guideAlias = aliasedTable(userAliases, "guide_alias");
-  const myMatches = await db()
-    .select({ rank: matches.rank, score: matches.score, explanation: matches.explanation, createdAt: matches.createdAt, guideAlias: guideAlias.alias })
+  const matchRows = await db()
+    .select({ rank: matches.rank, score: matches.score, explanation: matches.explanation, createdAt: matches.createdAt, guideData: guideProfiles.data })
     .from(matches)
-    .leftJoin(guideAlias, eq(guideAlias.userId, matches.guideId))
+    .leftJoin(guideProfiles, eq(guideProfiles.userId, matches.guideId))
     .where(eq(matches.seekerId, userId))
     .orderBy(desc(matches.createdAt));
 
-  const ratedGuide = aliasedTable(userAliases, "rated_alias");
-  const given = await db()
-    .select({ score: ratings.score, review: ratings.review, createdAt: ratings.createdAt, guideAlias: ratedGuide.alias })
+  const givenRows = await db()
+    .select({ score: ratings.score, review: ratings.review, createdAt: ratings.createdAt, guideData: guideProfiles.data })
     .from(ratings)
-    .leftJoin(ratedGuide, eq(ratedGuide.userId, ratings.guideId))
+    .leftJoin(guideProfiles, eq(guideProfiles.userId, ratings.guideId))
     .where(eq(ratings.seekerId, userId));
 
-  const blockedAlias = aliasedTable(userAliases, "blocked_alias");
-  const blocked = await db().select({ alias: blockedAlias.alias, createdAt: blocks.createdAt }).from(blocks).leftJoin(blockedAlias, eq(blockedAlias.userId, blocks.blockedId)).where(eq(blocks.blockerId, userId));
+  const blockedRows = await db()
+    .select({ createdAt: blocks.createdAt, guideData: guideProfiles.data, seekerData: seekerProfiles.data })
+    .from(blocks)
+    .leftJoin(guideProfiles, eq(guideProfiles.userId, blocks.blockedId))
+    .leftJoin(seekerProfiles, eq(seekerProfiles.userId, blocks.blockedId))
+    .where(eq(blocks.blockerId, userId));
   const myReports = await db().select({ reason: reports.reason, details: reports.details, status: reports.status, createdAt: reports.createdAt }).from(reports).where(eq(reports.reporterId, userId));
   const activity = await db().select({ action: auditLog.action, at: auditLog.at }).from(auditLog).where(eq(auditLog.actorId, userId)).orderBy(desc(auditLog.at)).limit(500);
 
   return {
     generatedAt: new Date().toISOString(),
-    account: { email: user.email, createdAt: user.createdAt, role: role?.role ?? null, alias: alias?.alias ?? null },
-    profile: { completed: Boolean((seeker ?? guide)?.profileCompletedAt), answers: (seeker ?? guide)?.data ?? null, unsubmittedDraft: draft?.data ?? null },
-    phone: guide ? { onFile: Boolean(vault), endsWith: vault?.last4 ?? null, note: "Your number is stored encrypted and shown only to Seekers you approve." } : undefined,
-    matches: myMatches,
-    requests: requests.map((r) => ({ direction: r.seekerId === userId ? "sent" : "received", with: r.otherAlias, status: r.status, note: r.seekerId === userId ? r.note : undefined, createdAt: r.createdAt, decidedAt: r.decidedAt })),
-    ratingsGiven: given,
+    account: { email: user.email, createdAt: user.createdAt, role: role?.role ?? null },
+    profile: { completed: Boolean((seeker ?? guide)?.profileCompletedAt), answers: stripLegacy((seeker ?? guide)?.data), unsubmittedDraft: draft?.data ?? null },
+    phone: guide ? { onFile: Boolean(vault), endsWith: vault?.last4 ?? null, note: "If you provide a number it is stored encrypted and e-mailed to Seekers who connect with you. You can remove it any time." } : undefined,
+    matches: matchRows.map(({ guideData, ...m }) => ({ ...m, guide: guideDisplayName(guideData) })),
+    requests: requestRows.map((r) => ({ direction: r.seekerId === userId ? "sent" : "received", with: r.seekerId === userId ? guideDisplayName(r.guideData) : seekerDisplayName(r.seekerData), status: r.status, note: r.seekerId === userId ? r.note : undefined, createdAt: r.createdAt, decidedAt: r.decidedAt })),
+    ratingsGiven: givenRows.map(({ guideData, ...g }) => ({ ...g, guide: guideDisplayName(guideData) })),
     ratingsReceived: guide ? await guideRatingSummary(userId) : undefined,
-    blocks: blocked,
+    blocks: blockedRows.map((b) => ({ blocked: b.guideData ? guideDisplayName(b.guideData) : seekerDisplayName(b.seekerData), createdAt: b.createdAt })),
     reportsMade: myReports,
     activity,
   };

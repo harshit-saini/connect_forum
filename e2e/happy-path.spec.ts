@@ -5,7 +5,7 @@ test.beforeAll(freeMemberIds);
 test.afterAll(freeMemberIds);
 
 // Needs seeded Guides (`pnpm seed`).
-test("sign in, register, FAQs, find guides, request, approve, reveal, rate", async ({ page, browser }) => {
+test("sign in, register, FAQs, find guides, connect, e-mailed details, show number, rate", async ({ page }) => {
   const email = `happy-${Date.now()}@example.com`;
   const startedAt = new Date();
 
@@ -21,30 +21,28 @@ test("sign in, register, FAQs, find guides, request, approve, reveal, rate", asy
   await page.getByRole("button", { name: "Find guides" }).click();
   const first = page.getByRole("listitem").filter({ hasText: "Why this Guide" }).first();
   await expect(first).toBeVisible({ timeout: 60_000 });
-  const alias = (await first.getByRole("heading", { level: 3 }).textContent())!;
+  const guideName = (await first.getByRole("heading", { level: 3 }).textContent())!;
 
-  // 4. Request
+  // 4. Connect: no approval step, the card says "Details sent"
   await first.getByRole("button", { name: "I want to connect" }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Send request" }).click();
-  await expect(first.getByText("Request sent")).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Email me their details" }).click();
+  await expect(first.getByText("Details sent")).toBeVisible();
 
-  // 5. The Guide (not signed in) approves from the emailed link
-  let link = "";
+  // 5. The Guide's details and phone number arrive by e-mail, and the Guide gets a heads-up
   await expect(async () => {
-    const rows = await sql<{ text: string }>("select text from dev_outbox where subject like 'A Seeker would like%' and created_at > $1 order by created_at desc limit 1", [startedAt]);
-    link = /(http:\/\/\S+\/review\/[A-Za-z0-9_-]{43})/.exec(rows[0]?.text ?? "")?.[1] ?? "";
-    expect(link).not.toBe("");
+    const rows = await sql<{ text: string }>("select text from dev_outbox where \"to\" = $1 and subject = 'Your Guide''s details' and created_at > $2 order by created_at desc limit 1", [email, startedAt]);
+    expect(rows[0]?.text).toContain(guideName);
+    expect(rows[0]?.text).toMatch(/\+9190000000\d\d/);
   }).toPass({ timeout: 20_000 });
-  const guideCtx = await browser.newContext();
-  const guide = await guideCtx.newPage();
-  await guide.goto(link);
-  await guide.getByRole("button", { name: /Approve/ }).click();
-  await expect(guide.getByText(/Seeker has been notified/)).toBeVisible();
-  await guideCtx.close();
+  await expect(async () => {
+    const rows = await sql("select 1 from dev_outbox where subject = 'A Seeker has been given your details' and created_at > $1", [startedAt]);
+    expect(rows.length).toBeGreaterThan(0);
+  }).toPass({ timeout: 20_000 });
 
-  // 6. Reveal
+  // 6. Show number (the fallback when the e-mail is lost)
   await page.goto("/seeker/connections");
-  await expect(page.getByText(alias)).toBeVisible();
+  await expect(page.getByText(guideName).first()).toBeVisible();
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Open" }).click();
   await page.getByRole("button", { name: "Show number" }).click();
   await expect(page.getByTestId("revealed-number")).toHaveText(/^\+9190000000\d\d$/);

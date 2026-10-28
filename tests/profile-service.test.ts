@@ -1,10 +1,10 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { db } from "@/server/db/client";
 import { counters, guideProfiles, phoneVault, seekerProfiles, userRoles } from "@/server/db/schema";
 import { loadProfileState, saveProfile } from "@/server/profile/service";
 import { openRow } from "@/server/vault";
-import { createUser, guideForm, nextGuideMemberId, PHONE, seekerForm, uniqueAlias } from "./fixtures";
+import { createUser, guideForm, nextGuideMemberId, PHONE, seekerForm } from "./fixtures";
 
 const poolVersion = async () => (await db().select().from(counters).where(eq(counters.name, "guide_pool_version")))[0]?.value ?? 0;
 
@@ -29,7 +29,7 @@ describe("seeker registration", () => {
   it("rejects contact details in the question with the standard message", async () => {
     const u = await createUser();
     const r = await saveProfile({ userId: u.id, role: "seeker", values: seekerForm({ query: "I feel stuck in my job, email me at x@y.com about it" }) });
-    expect(r).toMatchObject({ ok: false, fieldErrors: { query: "Please remove contact details. Contact details are only shared after approval." } });
+    expect(r).toMatchObject({ ok: false, fieldErrors: { query: "Please remove contact details. Contact details can't be shared in free text." } });
   });
 
   it("requires the category, a question and the consent", async () => {
@@ -39,15 +39,14 @@ describe("seeker registration", () => {
     if (!r.ok) expect(Object.keys(r.fieldErrors).sort()).toEqual(["agree", "category", "query"]);
   });
 
-  it("enforces unique aliases case-insensitively, allows keeping your own, and blocks reserved ones", async () => {
-    const alias = uniqueAlias("Dup");
-    const a = await createUser();
-    const b = await createUser();
-    const form = seekerForm({ alias });
-    expect(await saveProfile({ userId: a.id, role: "seeker", values: form })).toMatchObject({ ok: true });
-    expect(await saveProfile({ userId: a.id, role: "seeker", values: form })).toMatchObject({ ok: true });
-    expect(await saveProfile({ userId: b.id, role: "seeker", values: seekerForm({ alias: alias.toUpperCase() }) })).toEqual({ ok: false, fieldErrors: { alias: "That alias is already taken" } });
-    expect(await saveProfile({ userId: b.id, role: "seeker", values: seekerForm({ alias: "Admin" }) })).toMatchObject({ ok: false, fieldErrors: { alias: expect.any(String) } });
+  it("stores no alias: an alias key in the form is dropped and the profile has none", async () => {
+    const u = await createUser();
+    const form = { ...seekerForm(), alias: "Curious Falcon" };
+    expect(await saveProfile({ userId: u.id, role: "seeker", values: form })).toMatchObject({ ok: true });
+    const [p] = await db().select().from(seekerProfiles).where(eq(seekerProfiles.userId, u.id));
+    expect(p?.data).not.toHaveProperty("alias");
+    expect(await loadProfileState(u.id, "seeker")).toMatchObject({ completed: true });
+    expect((await loadProfileState(u.id, "seeker")).data).not.toHaveProperty("alias");
   });
 });
 
@@ -101,10 +100,37 @@ describe("member ID check", () => {
     expect(p?.profileVersion).toBe(4);
   });
 
-  it("keeps one role per account", async () => {
-    const u = await createUser("seeker");
+  it("keeps one completed role per account", async () => {
+    const u = await createUser();
+    expect(await saveProfile({ userId: u.id, role: "seeker", values: seekerForm() })).toMatchObject({ ok: true });
     const r = await saveProfile({ userId: u.id, role: "guide", values: guideForm(), phone: PHONE });
-    expect(r).toMatchObject({ ok: false, fieldErrors: { _: expect.stringContaining("registered as a Seeker") } });
+    expect(r).toMatchObject({ ok: false, fieldErrors: { _: expect.stringMatching(/already registered as a Seeker.*different email/) } });
+    expect((await db().select().from(userRoles).where(eq(userRoles.userId, u.id)))[0]?.role).toBe("seeker");
+    expect(await db().select().from(guideProfiles).where(eq(guideProfiles.userId, u.id))).toHaveLength(0);
+  });
+
+  it("replaces a stale role row (profile never completed) when the account registers as the other role", async () => {
+    // An incomplete Guide row, and a legacy Seeker row without a member ID, both count as not registered.
+    const staleGuide = await createUser("guide");
+    await db().insert(guideProfiles).values({ userId: staleGuide.id, data: {}, profileVersion: 0 });
+    expect(await saveProfile({ userId: staleGuide.id, role: "seeker", values: seekerForm() })).toEqual({ ok: true, created: true });
+    expect((await db().select().from(userRoles).where(eq(userRoles.userId, staleGuide.id)))).toMatchObject([{ role: "seeker" }]);
+    expect((await loadProfileState(staleGuide.id, "seeker")).completed).toBe(true);
+
+    const legacySeeker = await createUser("seeker");
+    await db().insert(seekerProfiles).values({ userId: legacySeeker.id, data: { old: "answers" }, profileCompletedAt: new Date(), profileVersion: 2 });
+    expect(await saveProfile({ userId: legacySeeker.id, role: "guide", values: guideForm(), phone: PHONE })).toEqual({ ok: true, created: true });
+    expect((await db().select().from(userRoles).where(eq(userRoles.userId, legacySeeker.id)))).toMatchObject([{ role: "guide" }]);
+    expect((await loadProfileState(legacySeeker.id, "guide")).completed).toBe(true);
+  });
+
+  it("refuses the other role once a role is completed, and says to use a different email", async () => {
+    const g = await createUser();
+    expect(await saveProfile({ userId: g.id, role: "guide", values: guideForm(), phone: PHONE })).toMatchObject({ ok: true });
+    const r = await saveProfile({ userId: g.id, role: "seeker", values: seekerForm() });
+    expect(r).toEqual({ ok: false, fieldErrors: { _: "This email is already registered as a Guide. Use a different email address." } });
+    expect((await db().select().from(userRoles).where(eq(userRoles.userId, g.id)))[0]?.role).toBe("guide");
+    expect(await db().select().from(seekerProfiles).where(eq(seekerProfiles.userId, g.id))).toHaveLength(0);
   });
 });
 
@@ -122,17 +148,69 @@ describe("guide registration", () => {
     const [g] = await db().select().from(guideProfiles).where(eq(guideProfiles.userId, u.id));
     expect(JSON.stringify(g)).not.toContain("9876543210");
     expect(g!.categories).toEqual(["career_stagnation", "uncertainty"]);
-    expect(g!.maxNewSeekersPerMonth).toBe(3);
     expect(g!.profileVersion).toBe(1);
     expect(await poolVersion()).toBeGreaterThan(before);
   });
 
-  it("requires a phone number in a valid format, and at least one category", async () => {
+  it("registers without a phone number: it is optional and nothing is stored in the vault", async () => {
     const u = await createUser();
-    expect(await saveProfile({ userId: u.id, role: "guide", values: guideForm() })).toMatchObject({ ok: false, fieldErrors: { phone: "Your phone number is required" } });
+    expect(await saveProfile({ userId: u.id, role: "guide", values: guideForm() })).toEqual({ ok: true, created: true });
+    expect(await db().select().from(phoneVault).where(eq(phoneVault.guideId, u.id))).toHaveLength(0);
+    expect((await loadProfileState(u.id, "guide")).phone).toEqual({ has: false, last4: null });
+    expect((await db().select().from(guideProfiles).where(eq(guideProfiles.userId, u.id)))[0]!.profileCompletedAt).toBeInstanceOf(Date);
+  });
+
+  it("still format-checks a number that is given, and requires at least one category", async () => {
+    const u = await createUser();
     expect(await saveProfile({ userId: u.id, role: "guide", values: guideForm(), phone: "98765" })).toMatchObject({ ok: false, fieldErrors: { phone: expect.any(String) } });
     expect(await saveProfile({ userId: u.id, role: "guide", values: guideForm({ categories: [] }), phone: PHONE })).toMatchObject({ ok: false, fieldErrors: { categories: expect.any(String) } });
     expect(await db().select().from(guideProfiles).where(eq(guideProfiles.userId, u.id))).toHaveLength(0);
+    expect(await db().select().from(phoneVault).where(eq(phoneVault.guideId, u.id))).toHaveLength(0);
+  });
+
+  it("adds a number later, replaces it, and removing it deletes the vault row", async () => {
+    const u = await createUser();
+    const form = guideForm();
+    await saveProfile({ userId: u.id, role: "guide", values: form });
+    expect(await db().select().from(phoneVault).where(eq(phoneVault.guideId, u.id))).toHaveLength(0);
+
+    // add
+    expect(await saveProfile({ userId: u.id, role: "guide", values: form, phone: PHONE })).toMatchObject({ ok: true, created: false });
+    const [added] = await db().select().from(phoneVault).where(eq(phoneVault.guideId, u.id));
+    expect(openRow(added!, u.id)).toBe(PHONE);
+    expect(added!.encryptedNumber.toString("utf8")).not.toContain("9876543210");
+
+    // an edit without a number keeps the saved one
+    expect(await saveProfile({ userId: u.id, role: "guide", values: form })).toMatchObject({ ok: true });
+    expect(await db().select().from(phoneVault).where(eq(phoneVault.guideId, u.id))).toHaveLength(1);
+
+    // replace
+    expect(await saveProfile({ userId: u.id, role: "guide", values: form, phone: "+14155552671" })).toMatchObject({ ok: true });
+    const [replaced] = await db().select().from(phoneVault).where(eq(phoneVault.guideId, u.id));
+    expect(openRow(replaced!, u.id)).toBe("+14155552671");
+    expect(replaced!.last4).toBe("2671");
+
+    // remove
+    expect(await saveProfile({ userId: u.id, role: "guide", values: form, removePhone: true })).toMatchObject({ ok: true });
+    expect(await db().select().from(phoneVault).where(eq(phoneVault.guideId, u.id))).toHaveLength(0);
+    expect((await loadProfileState(u.id, "guide")).phone.has).toBe(false);
+    // removing again is harmless
+    expect(await saveProfile({ userId: u.id, role: "guide", values: form, removePhone: true })).toMatchObject({ ok: true });
+  });
+
+  it("a number given in the same save wins over removePhone, and a bad number blocks the whole save", async () => {
+    const u = await createUser();
+    const form = guideForm();
+    await saveProfile({ userId: u.id, role: "guide", values: form, phone: PHONE });
+    expect(await saveProfile({ userId: u.id, role: "guide", values: form, phone: "+14155552671", removePhone: true })).toMatchObject({ ok: true });
+    expect(openRow((await db().select().from(phoneVault).where(eq(phoneVault.guideId, u.id)))[0]!, u.id)).toBe("+14155552671");
+    expect(await saveProfile({ userId: u.id, role: "guide", values: form, phone: "12", removePhone: true })).toMatchObject({ ok: false, fieldErrors: { phone: expect.any(String) } });
+    expect(await db().select().from(phoneVault).where(eq(phoneVault.guideId, u.id))).toHaveLength(1); // nothing changed
+  });
+
+  it("removePhone is ignored for Seekers", async () => {
+    const u = await createUser();
+    expect(await saveProfile({ userId: u.id, role: "seeker", values: seekerForm(), removePhone: true })).toMatchObject({ ok: true });
   });
 
   it("only bumps profile_version and the guide pool for matching-relevant edits", async () => {
@@ -141,8 +219,8 @@ describe("guide registration", () => {
     await saveProfile({ userId: u.id, role: "guide", values: form, phone: PHONE });
     const before = await poolVersion();
 
-    // The saved number is reused when no new one is given; changing only the alias is not matching-relevant.
-    expect(await saveProfile({ userId: u.id, role: "guide", values: { ...form, alias: uniqueAlias("Renamed") } })).toMatchObject({ ok: true, created: false });
+    // The saved number is reused when no new one is given; a leftover alias key is not matching-relevant.
+    expect(await saveProfile({ userId: u.id, role: "guide", values: { ...form, alias: "Renamed" } })).toMatchObject({ ok: true, created: false });
     expect(await poolVersion()).toBe(before);
     expect((await db().select().from(guideProfiles).where(eq(guideProfiles.userId, u.id)))[0]!.profileVersion).toBe(1);
 
@@ -151,5 +229,26 @@ describe("guide registration", () => {
     const [g] = await db().select().from(guideProfiles).where(eq(guideProfiles.userId, u.id));
     expect(g!.profileVersion).toBe(2);
     expect(g!.categories).toEqual(["uncertainty"]);
+  });
+});
+
+describe("legacy alias data", () => {
+  it("is never returned to the member or exported, even when an old row still carries one", async () => {
+    const { buildExport } = await import("@/server/account");
+    const u = await createUser();
+    await saveProfile({ userId: u.id, role: "seeker", values: seekerForm() });
+    await db().update(seekerProfiles).set({ data: sql`${seekerProfiles.data} || '{"alias":"OldAlias42"}'::jsonb` }).where(eq(seekerProfiles.userId, u.id));
+    expect((await loadProfileState(u.id, "seeker")).data).not.toHaveProperty("alias");
+    expect(JSON.stringify(await buildExport(u.id))).not.toContain("OldAlias42");
+  });
+
+  it("serialises two simultaneous registrations for one account into a single role", async () => {
+    const u = await createUser();
+    const [a, b] = await Promise.all([
+      saveProfile({ userId: u.id, role: "seeker", values: seekerForm() }),
+      saveProfile({ userId: u.id, role: "guide", values: guideForm(), phone: PHONE }),
+    ]);
+    expect([a.ok, b.ok].filter(Boolean)).toHaveLength(1); // the loser is told the account is already registered
+    expect(await db().select().from(userRoles).where(eq(userRoles.userId, u.id))).toHaveLength(1);
   });
 });

@@ -2,7 +2,7 @@
 
 A Next.js (App Router, TypeScript) PWA, deployed on Vercel, with no separate backend.
 
-**Seekers** want career help; **Guides** are experienced people ready to give it. Both stay anonymous (aliases only) until a Guide approves a connection. An AI ranks Guides for each Seeker from the career profile each user fills in. The platform never relays messages: after approval the Seeker sees the Guide's phone number in the portal and contacts the Guide directly, outside the portal. Afterwards the Seeker rates the Guide, and ratings feed future matching.
+**Seekers** want career help; **Guides** are experienced people ready to give it. Seekers stay anonymous: Guides never see a Seeker's name, email or phone number. An AI ranks Guides for each Seeker from the career profile each user fills in. There is no approval step: when a Seeker connects with a match, the Guide's details are emailed to the Seeker straight away, including the Guide's phone number if (and only if) the Guide provided one. The platform never relays messages: the Seeker contacts the Guide directly, outside the portal. Afterwards the Seeker rates the Guide, and ratings feed future matching.
 
 - [Quick start](#quick-start)
 - [How it works](#how-it-works)
@@ -54,13 +54,13 @@ Scripts: `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm test:e2e`, `pnpm db:g
 ## How it works
 
 1. **Join through a link.** Seekers use `/join/seeker` (the link to host on the website, e.g. GACS.world); Guides get `/join/guide` by e-mail from *Admin → Invite Guides*. Both ask the visitor to sign in with e-mail (a 6-digit one-time code) and then show **one short page**.
-2. **Member ID check (hard).** The form asks for the member ID. It must be on the role's allow-list: `GUIDE_MEMBER_IDS` for Guides, `SEEKER_MEMBER_IDS` for Seekers (case and spaces ignored; a Guide ID doesn't work for a Seeker). Each ID registers one account and can't be changed afterwards. With an empty list nobody can register. A Seeker form is category, question and years of experience; a Guide form is categories, role, a short "how can you help", years, monthly capacity and a phone number (AES-256-GCM vault, never stored anywhere else). Pages other than Settings and sign-out stay gated until registration is complete.
+2. **Member ID check (hard).** The form asks for the member ID. It must be on the role's allow-list: `GUIDE_MEMBER_IDS` for Guides, `SEEKER_MEMBER_IDS` for Seekers (case and spaces ignored; a Guide ID doesn't work for a Seeker). Each ID registers one account and can't be changed afterwards. With an empty list nobody can register. A Seeker form is category, question and years of experience; a Guide form is categories, role, a short "how can you help", years and an **optional** phone number (AES-256-GCM vault, never stored anywhere else). The form says plainly that a number you provide is emailed to Seekers who connect with you; a Guide can add, change or remove it later by editing the profile (removing deletes the vault row). Pages other than Settings and sign-out stay gated until registration is complete.
    - **Categories (pilot):** Layoff / Unemployment, Career Stagnation, Upskilling / Training, Uncertainty (`src/config/taxonomy.ts`). A Seeker picks one; a Guide picks every one they can help with. A Guide is only matched to Seekers in their categories.
    - **FAQs first.** Before a Seeker's first search the dashboard shows the FAQs for their category (`src/config/faqs.ts`, also at `/faq`). *This answered my question* ends it there; *I still need a Guide* continues to matching. Outcomes are counted per category (no text stored) on the Admin home page.
-3. **Find guides** (Seeker, on demand): hard filters in SQL (category, experience, capacity, blocks), a structured score (experience, focus), pgvector similarity, then an LLM rerank on *public fields only*, with a non-LLM fallback. Preliminary matches appear first and are upgraded in place; the Seeker is also e-mailed.
-4. **Request**: the Seeker adds an optional note (screened for contact details). The Guide gets an e-mail with an anonymous summary and a **single-use link**, and approves or declines with a POST. No login needed.
-5. **Reveal**: after approval the Seeker opens the connection and presses *Show number*. The server checks the unlock for that exact pair, decrypts, rate-limits, audits and returns the number with `Cache-Control: no-store`.
-6. **Rating**: `RATING_DELAY_DAYS` after approval the Seeker is reminded to rate (1–5, optional private review). Guides see only an average and count, hidden until 3 ratings.
+3. **Find guides** (Seeker, on demand): hard filters in SQL (category, experience, blocks), a structured score (experience, focus), pgvector similarity, then an LLM rerank on *public fields only*, with a non-LLM fallback. Preliminary matches appear first and are upgraded in place; the Seeker is also e-mailed.
+4. **Connect**: on a match card the Seeker presses *I want to connect* (optionally adding a note, screened for contact details). The server immediately records an **approved** connection (status `approved`, `approved_at` now, an `unlocks` row for the pair, audit entries) and queues two e-mails through the job queue (payloads carry ids only): to the **Seeker**, the Guide's public details (role, years, categories, how they can help) plus the Guide's phone number only if one is on file (decrypted at send time via `decryptPhoneForReveal`, never stored in the job), or a plain note that the Guide gave no number so the Seeker can't contact them directly; to the **Guide**, a short heads-up with the Seeker's category and question (a Seeker has no contact details to share). Nothing to approve, no link, no expiry.
+5. **Reveal (fallback)**: if the e-mail is lost, the Seeker opens the connection and presses *Show number* (only shown when the Guide has a number). The server checks the unlock for that exact pair, decrypts, rate-limits, audits and returns the number with `Cache-Control: no-store`.
+6. **Rating**: `RATING_DELAY_DAYS` after connecting the Seeker is reminded to rate (1–5, optional private review). Guides see only an average and count, hidden until 3 ratings.
 
 Admins (`ADMIN_EMAILS`) can list and suspend users, review reports, read ratings and reviews, and browse the audit log.
 
@@ -70,11 +70,11 @@ Admins (`ADMIN_EMAILS`) can list and suspend users, review reports, read ratings
 
 ```
 src/
-  app/                   routes (App Router): (public) (setup) (app)/(gated) admin, api/*, review/[token]
+  app/                   routes (App Router): (public) (setup) (app)/(gated) admin, api/*
   components/            ui/ (shadcn-style primitives), form/, join/ (the one-page form), faq/, profile/, matches/, safety/, pwa/
   config/                taxonomy.ts (all option lists), matching.ts (all weights/limits), safety.ts
   schemas/               zod schemas shared by browser and server (one seeker form, one guide form)
-  lib/                   screening.ts (contact-detail screening), countries, alias, utils
+  lib/                   screening.ts (contact-detail screening), countries, display, utils
   server/                server-only code (`import "server-only"`)
     db/                  Drizzle client + schema (auth, core, profiles, jobs, matching)
     auth.ts              Better Auth (email OTP)
@@ -82,8 +82,8 @@ src/
     jobs/                JobQueue interface, Postgres queue, worker, handlers, kick
     ai/                  LlmProvider + EmbeddingProvider: mock and Azure AI Foundry
     matching/            candidates (SQL filters), scoring, rerank, pipeline, public projections
-    connections/         requests, token approval, reveal
-    ratings/ safety/ admin/ account/ audit/ email/ ratelimit/ tokens/ profile/ logging/
+    connections/         connect (immediate approval), reveal
+    ratings/ safety/ admin/ account/ audit/ email/ ratelimit/ profile/ logging/
   proxy.ts               per-request CSP nonce + optimistic auth redirect (Next 16 "proxy", formerly middleware)
 public/                  sw.js (service worker), offline.html, icons/
 drizzle/                 generated SQL migrations
@@ -123,8 +123,7 @@ Validated with zod at server start (`src/server/env.ts`); a bad config fails fas
 | `EMBEDDING_DEPLOYMENT` | no | Embedding deployment name (default `text-embedding-3-small`, 1536 dimensions). |
 | `ENABLE_EMBEDDINGS` | no (true) | `false` skips vector retrieval; the top 20 by structured score are reranked instead. |
 | `MOCK_AI` | no (false) | `true` mocks the LLM, embeddings and e-mail. **Refused on a Vercel production deploy.** |
-| `RATING_DELAY_DAYS` | no (3) | Days after approval before the rating reminder. |
-| `MAX_PENDING_REQUESTS` | no (3) | Pending requests a Seeker may have at once. |
+| `RATING_DELAY_DAYS` | no (3) | Days after connecting before the rating reminder. |
 | `MIN_GUIDE_EXPERIENCE_YEARS` | no (3) | Guides below this register but are not matched. |
 | `MATCH_COOLDOWN_MINUTES` | no (60) | Minimum gap between a Seeker's searches. |
 | `MATCH_MAX_RUNS_PER_DAY` | no (3) | Searches per Seeker per rolling 24 h. |
@@ -149,8 +148,8 @@ pnpm test        # Vitest against a real Postgres+pgvector (TEST_DATABASE_URL, d
 pnpm test:e2e    # Playwright against a production build, with mock AI
 ```
 
-- **Vitest** (≈160 tests): matching filters and scoring, rerank validation and prompt-injection containment, vault crypto and rotation, tokens and CSRF, validators and screening, the queue (concurrent claims, caps, backoff, stale recovery), connections, reveal, ratings, admin, export/delete, webhook signatures, and the service worker's routing.
-- **Playwright**: the happy path (sign-in → register → FAQs → Find guides → request → approve → reveal → rate), plus registration for both roles (member-ID check, FAQs), the gate, admin, the PWA (real cache inspection and offline behaviour) and the Guide dashboard. Every e2e test fails on hydration errors and CSP violations. They need seeded data (`pnpm seed`) and a Postgres database (`DATABASE_URL`).
+- **Vitest** (≈160 tests): matching filters and scoring, rerank validation and prompt-injection containment, vault crypto and rotation, validators and screening, the queue (concurrent claims, caps, backoff, stale recovery), connections, reveal, ratings, admin, export/delete, webhook signatures, and the service worker's routing.
+- **Playwright**: the happy path (sign-in → register → FAQs → Find guides → connect → details e-mailed → reveal → rate), plus registration for both roles (member-ID check, FAQs), the gate, admin, the PWA (real cache inspection and offline behaviour) and the Guide dashboard. Every e2e test fails on hydration errors and CSP violations. They need seeded data (`pnpm seed`) and a Postgres database (`DATABASE_URL`).
 - In the sandbox this was built in, Playwright's bundled browser wasn't installable; set `CHROMIUM_PATH` to use another Chromium. CI installs it normally.
 
 CI (`.github/workflows/ci.yml`) runs typecheck, lint, tests and build, and a separate Playwright job, both with a `pgvector/pgvector:pg16` service.
@@ -217,11 +216,11 @@ A Postgres `jobs` table behind a `JobQueue` interface (swap in QStash/Inngest by
 - Workers claim with `SELECT … FOR UPDATE SKIP LOCKED`; `match_run` concurrency is capped globally (`MATCH_MAX_CONCURRENCY`) under an advisory lock.
 - Failures back off exponentially (30 s, 60 s, …) and become `dead` after the attempt limit. A dead `match_run` marks its run `failed`.
 - A running job with no heartbeat for 5 minutes is requeued automatically at the next claim (and by housekeeping), so a function killed at its time limit never blocks the queue.
-- Payloads carry ids only. The one exception is the single-use review token, which sits **vault-encrypted** in the `send_email` payload until the e-mail is sent, then is removed.
+- Payloads carry ids only, never an address or a phone number: the connection e-mails look the recipient and the Guide's number up (and decrypt it) when they are sent.
 
 ### Housekeeping (`GET /api/cron/housekeeping`)
 
-Idempotent and safe to run late or twice. Requeues stalled jobs, fails runs whose job died, expires pending requests older than 7 days (and notifies the Seekers), runs whatever jobs are due (rating reminders), and purges old rate-limit rows, finished jobs and expired verification/session rows.
+Idempotent and safe to run late or twice. Requeues stalled jobs, fails runs whose job died, runs whatever jobs are due (rating reminders), and purges old rate-limit rows, finished jobs and expired verification/session rows.
 
 ### Vault key rotation
 
@@ -242,13 +241,12 @@ All matching weights and limits are in `src/config/matching.ts`; all option list
 
 ## Security and privacy model
 
-- **Anonymity**: only aliases are visible between users. No API returns another user's e-mail, real name, LinkedIn, private fields, exclusion list or phone, except the phone through the reveal endpoint. Matching never uses gender, age, religion, caste, marital status, photo or real name (none is collected).
-- **Phone numbers**: encrypted at rest in their own table; never in drafts, logs, e-mails, AI prompts, audit rows or cached responses (tests assert each). The service worker cannot cache them: it never intercepts API, auth, review or personal pages.
+- **Anonymity**: users see each other only by role/category and experience; there are no aliases. No API returns another user's e-mail, real name, LinkedIn, private fields, exclusion list or phone, except the phone through the reveal endpoint. Matching never uses gender, age, religion, caste, marital status, photo or real name (none is collected).
+- **Phone numbers**: encrypted at rest in their own table; never in drafts, logs, job payloads, AI prompts, audit rows or cached responses (tests assert each). The one deliberate exception: a Guide who provides a number agrees (the form says so) that it is **e-mailed to Seekers who connect with them**. E-mail is not a private channel, so the Guide can remove the number at any time (it only affects future connections). The service worker cannot cache the reveal response: it never intercepts API, auth or personal pages.
 - **AI**: only an explicit public projection of each profile is sent to the model, as JSON inside delimited data blocks, with instructions to ignore any instructions inside them. Output is schema-validated, retried once, then replaced by the non-LLM ranking. Free text is screened for contact details on input.
-- **Tokens**: 256-bit random, only the SHA-256 hash is stored, single-use, 7-day expiry. Opening the link is read-only; approving is a POST with a signed CSRF value bound to the token, under a row lock.
 - **Web**: HTTP-only `SameSite=Lax` session cookies (`Secure` in production), nonce-based CSP, HSTS, `frame-ancestors 'none'`, origin checks on state-changing route handlers, Next's built-in Origin check on server actions.
-- **Abuse limits**: Postgres-backed fixed-window rate limits on auth, review links, match start, requests, reveal, report/block, ratings and export; plus per-Seeker cooldown, daily cap and a global LLM budget.
-- **Accountability**: an audit log of requests, approvals, unlocks, reveals (and denied reveals), suspensions, reports and exports. Structured logs are redacted.
+- **Abuse limits**: Postgres-backed fixed-window rate limits on auth, match start, connecting, reveal, report/block, ratings and export; plus per-Seeker cooldown, daily cap and a global LLM budget.
+- **Accountability**: an audit log of connections, unlocks, reveals (and denied reveals), suspensions, reports and exports. Structured logs are redacted.
 - **Your data**: Settings has JSON export and account deletion. Deletion hard-deletes the vault entry and embeddings explicitly, then everything else by cascade; the audit log keeps an anonymous record.
 
 ---
@@ -262,8 +260,8 @@ Things worth knowing, where the build had to choose or differ from the brief's l
 - **Service worker**: hand-written rather than Serwist. Serwist's Next integration hooks webpack, while this project builds with Turbopack. The worker is ~60 lines, unit-tested, and caches only static assets and the offline page.
 - **"Multi-select, rank top 3"** is modelled as an ordered list: position is the rank and the first three are weighted most.
 - **Exclusion lists** hold employers/competitors. Two users sharing an excluded company are not matched, since that means a shared employer (the "either direction" check).
-- **Cached results hash**: besides profile version, guide-pool version and ratings, it includes the Seeker's own request activity, because pending and approved requests change who is eligible.
+- **Cached results hash**: besides profile version, guide-pool version and ratings, it includes the Seeker's own connection activity, because connections change who is eligible.
 - **LLM budget**: when `MAX_LLM_RUNS_PER_DAY` is spent, searches still run and rank without the LLM (marked in the UI) rather than being refused.
-- **Capacity**: a Guide's "max new Seekers per month" counts approvals, and is enforced both when matching and when a Guide approves.
-- **Ratings** are allowed once a request is approved (not gated on the reminder), editable for 7 days.
-- **Not built** (see `SUGGESTIONS.md`): unblock, cancelling a pending request, reporter notifications, push notifications (out of scope for v1).
+- **Ratings** are allowed once a Seeker has connected (not gated on the reminder), editable for 7 days.
+- **No approval step**: the product owner removed the Guide review page. Connecting is approving: the Seeker is e-mailed the Guide's details at once. Legacy columns on `connection_requests` that only the old review used (token hash, expiry, decision fields) stay in the table, unused and nullable; nothing was dropped. A pair that ever connected (or has an old pending request) is excluded from matching.
+- **Not built** (see `SUGGESTIONS.md`): unblock, reporter notifications, push notifications (out of scope for v1).

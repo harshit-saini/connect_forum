@@ -23,6 +23,9 @@ test("an admin can find a user, suspend and unsuspend them, and see it in the au
   await page.getByRole("button", { name: "Search" }).click();
   const row = page.getByRole("row").filter({ hasText: TARGET });
   await expect(row).toBeVisible();
+  // Members are identified by email and member ID; there is no alias column.
+  await expect(page.getByRole("columnheader", { name: "Alias" })).toHaveCount(0);
+  await expect(page.getByRole("columnheader", { name: "Email" })).toBeVisible();
   await row.getByLabel(/Reason for suspending/).fill("e2e check");
   await row.getByRole("button", { name: "Suspend" }).click();
   await expect(row.getByText("Suspended")).toBeVisible();

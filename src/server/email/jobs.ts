@@ -1,33 +1,64 @@
 import "server-only";
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, or } from "drizzle-orm";
 import { db } from "@/server/db/client";
-import { connectionRequests, jobs, matches, ratings, seekerProfiles, userAliases, users } from "@/server/db/schema";
+import { blocks, connectionRequests, matches, ratings, reports, guideProfiles, seekerProfiles, users } from "@/server/db/schema";
+import { audit } from "@/server/audit";
+import { guideDisplayName } from "@/lib/display";
 import { env } from "@/server/env";
 import { sendEmail } from "./index";
 import { MatchesReadyEmail } from "./templates/matches-ready";
 import { RatingReminderEmail } from "./templates/rating-reminder";
-import { ConnectionRequestEmail, RequestApprovedEmail, RequestDeclinedEmail, RequestExpiredEmail } from "./templates/connection";
-import { publicSeeker } from "@/server/matching/public";
-import { REQUEST_TTL_DAYS } from "@/server/connections/service";
-import { openFromString } from "@/server/vault";
-import type { SeekerProfileData } from "@/schemas";
+import { GuideDetailsEmail, GuideNotifiedEmail } from "./templates/connection";
+import { publicGuide, publicSeeker } from "@/server/matching/public";
+import { phoneStatus } from "@/server/profile/phone";
+import { decryptPhoneForReveal } from "@/server/vault/reveal";
+import type { GuideProfileData, SeekerProfileData } from "@/schemas";
 
 type Payload = { kind: string; userId: string; [k: string]: unknown };
 
 /**
- * `send_email` job: payloads carry ids only, never addresses or tokens. The recipient and content are
+ * An approved connection and its Guide, for the connection e-mails. `reachable` is false when the Guide
+ * is suspended or deleted or either side has blocked the other since the connection was made: then
+ * nothing about the Guide is sent.
+ */
+async function loadConnection(requestId: string) {
+  const [r] = await db()
+    .select({ id: connectionRequests.id, status: connectionRequests.status, seekerId: connectionRequests.seekerId, guideId: connectionRequests.guideId, note: connectionRequests.note, guideData: guideProfiles.data, suspendedAt: users.suspendedAt, deletedAt: users.deletedAt, gDeleted: guideProfiles.deletedAt })
+    .from(connectionRequests)
+    .innerJoin(guideProfiles, eq(guideProfiles.userId, connectionRequests.guideId))
+    .innerJoin(users, eq(users.id, connectionRequests.guideId))
+    .where(eq(connectionRequests.id, requestId))
+    .limit(1);
+  if (!r || r.status !== "approved") return null;
+  const [block] = await db()
+    .select({ id: blocks.id })
+    .from(blocks)
+    .where(or(and(eq(blocks.blockerId, r.seekerId), eq(blocks.blockedId, r.guideId)), and(eq(blocks.blockerId, r.guideId), eq(blocks.blockedId, r.seekerId))))
+    .limit(1);
+  // A report filed after connecting also stops the send (createRequest refuses a reported pair too).
+  const [report] = await db()
+    .select({ id: reports.id })
+    .from(reports)
+    .where(or(and(eq(reports.reporterId, r.seekerId), eq(reports.reportedId, r.guideId)), and(eq(reports.reporterId, r.guideId), eq(reports.reportedId, r.seekerId))))
+    .limit(1);
+  const reachable = !r.suspendedAt && !r.deletedAt && !r.gDeleted && !block && !report;
+  return { id: r.id, seekerId: r.seekerId, guideId: r.guideId, note: r.note, guideData: r.guideData as unknown as GuideProfileData, reachable };
+}
+
+/**
+ * `send_email` job: payloads carry ids only, never addresses or phone numbers. The recipient and content are
  * resolved when the job runs. Later milestones add their own kinds here.
  */
-export async function sendEmailJob(payload: Payload, jobId?: string): Promise<void> {
+export async function sendEmailJob(payload: Payload): Promise<void> {
   const [user] = await db().select().from(users).where(eq(users.id, payload.userId)).limit(1);
   if (!user || user.deletedAt || user.suspendedAt) return;
 
   switch (payload.kind) {
     case "matches_ready": {
       const rows = await db()
-        .select({ alias: userAliases.alias, why: matches.explanation })
+        .select({ data: guideProfiles.data, why: matches.explanation })
         .from(matches)
-        .innerJoin(userAliases, eq(userAliases.userId, matches.guideId))
+        .innerJoin(guideProfiles, eq(guideProfiles.userId, matches.guideId))
         .where(eq(matches.runId, String(payload.runId)))
         .orderBy(asc(matches.rank));
       if (rows.length === 0) return;
@@ -35,54 +66,61 @@ export async function sendEmailJob(payload: Payload, jobId?: string): Promise<vo
         to: user.email,
         subject: "Your top Guide matches are ready",
         kind: "matches-ready",
-        react: MatchesReadyEmail({ matches: rows, link: `${env().APP_URL}/seeker` }),
+        react: MatchesReadyEmail({ matches: rows.map((r) => ({ name: guideDisplayName(r.data as unknown as GuideProfileData), why: r.why })), link: `${env().APP_URL}/seeker` }),
       });
       return;
     }
-    case "connection_request": {
-      const requestId = String(payload.requestId);
-      const [r] = await db().select().from(connectionRequests).where(eq(connectionRequests.id, requestId)).limit(1);
-      if (!r || r.status !== "pending" || r.expiresAt.getTime() < Date.now()) return; // nothing left to review
-      const [seeker] = await db().select().from(seekerProfiles).where(eq(seekerProfiles.userId, r.seekerId)).limit(1);
-      const [alias] = await db().select().from(userAliases).where(eq(userAliases.userId, r.seekerId)).limit(1);
-      if (!seeker || !alias) return;
-      const pub = publicSeeker(seeker.data as unknown as SeekerProfileData);
-      const token = openFromString(String(payload.sealedToken), requestId);
+    case "guide_details": {
+      // To the Seeker: the Guide's public details and, only if they gave one, their number.
+      const c = await loadConnection(String(payload.requestId));
+      if (!c || c.seekerId !== user.id || !c.reachable) return;
+      const pub = publicGuide(c.guideData);
+      // Decrypted here, at send time. It goes into the e-mail only; the job row holds ids.
+      const phone = await decryptPhoneForReveal(db(), c.guideId);
       await sendEmail({
         to: user.email,
-        subject: "A Seeker would like your guidance",
-        kind: "connection-request",
-        react: ConnectionRequestEmail({
-          seekerAlias: alias.alias,
-          category: pub.category,
-          question: pub.question,
-          link: `${env().APP_URL}/review/${token}`,
-          days: REQUEST_TTL_DAYS,
-        }),
+        subject: "Your Guide's details",
+        kind: "guide-details",
+        react: GuideDetailsEmail({ title: pub.title, years: pub.years, categories: pub.categories, about: pub.about, phone, link: `${env().APP_URL}/seeker/connections/${c.id}` }),
+        // A retry after a lost response must not send the number twice.
+        idempotencyKey: `guide_details:${c.id}`,
       });
-      // The e-mail is out: drop the sealed token from the job row.
-      if (jobId) await db().update(jobs).set({ payload: sql`jsonb_build_object('kind', ${"connection_request"}::text, 'userId', ${payload.userId}::text, 'requestId', ${requestId}::text, 'sent', true)` }).where(eq(jobs.id, jobId));
+      // Ids and whether a number was included; never the number or the address.
+      await audit(db(), { action: "phone.emailed", actorId: c.seekerId, targetId: c.guideId, subjectType: "connection_request", subjectId: c.id, metadata: { included: phone !== null } });
       return;
     }
-    case "request_approved": {
-      const [r] = await db().select({ id: connectionRequests.id, status: connectionRequests.status, alias: userAliases.alias }).from(connectionRequests).innerJoin(userAliases, eq(userAliases.userId, connectionRequests.guideId)).where(eq(connectionRequests.id, String(payload.requestId)));
-      if (!r || r.status !== "approved") return;
-      await sendEmail({ to: user.email, subject: "Your request was approved", kind: "request-approved", react: RequestApprovedEmail({ guideAlias: r.alias, link: `${env().APP_URL}/seeker/connections/${r.id}` }) });
+    case "guide_notified": {
+      // To the Guide: a Seeker has their details. Seekers have no contact details to share.
+      const c = await loadConnection(String(payload.requestId));
+      if (!c || c.guideId !== user.id || !c.reachable) return;
+      const [seeker] = await db().select().from(seekerProfiles).where(eq(seekerProfiles.userId, c.seekerId)).limit(1);
+      if (!seeker) return;
+      const [seekerUser] = await db().select({ suspendedAt: users.suspendedAt, deletedAt: users.deletedAt }).from(users).where(eq(users.id, c.seekerId)).limit(1);
+      if (!seekerUser || seekerUser.suspendedAt || seekerUser.deletedAt) return;
+      const pub = publicSeeker(seeker.data as unknown as SeekerProfileData);
+      const { has } = await phoneStatus(db(), c.guideId);
+      await sendEmail({
+        to: user.email,
+        subject: "A Seeker has been given your details",
+        kind: "guide-notified",
+        react: GuideNotifiedEmail({ category: pub.category, question: pub.question, note: c.note, hasPhone: has }),
+        idempotencyKey: `guide_notified:${c.id}`,
+      });
       return;
     }
     case "rating_reminder": {
-      const [r] = await db().select({ id: connectionRequests.id, status: connectionRequests.status, alias: userAliases.alias }).from(connectionRequests).innerJoin(userAliases, eq(userAliases.userId, connectionRequests.guideId)).where(eq(connectionRequests.id, String(payload.requestId)));
+      const [r] = await db().select({ id: connectionRequests.id, status: connectionRequests.status, data: guideProfiles.data }).from(connectionRequests).innerJoin(guideProfiles, eq(guideProfiles.userId, connectionRequests.guideId)).where(eq(connectionRequests.id, String(payload.requestId)));
       if (!r || r.status !== "approved") return;
       const [done] = await db().select({ id: ratings.id }).from(ratings).where(eq(ratings.connectionRequestId, r.id)).limit(1);
       if (done) return; // already rated: no nag
-      await sendEmail({ to: user.email, subject: "How was your Guide?", kind: "rating-reminder", react: RatingReminderEmail({ guideAlias: r.alias, link: `${env().APP_URL}/seeker/rate/${r.id}` }) });
+      await sendEmail({ to: user.email, subject: "How was your Guide?", kind: "rating-reminder", react: RatingReminderEmail({ guideName: guideDisplayName(r.data as unknown as GuideProfileData), link: `${env().APP_URL}/seeker/rate/${r.id}` }) });
       return;
     }
+    // Kinds from the retired approval flow may still be queued in an existing database: drop them quietly.
+    case "connection_request":
+    case "request_approved":
     case "request_declined":
-      await sendEmail({ to: user.email, subject: "An update on your request", kind: "request-declined", react: RequestDeclinedEmail({ link: `${env().APP_URL}/seeker` }) });
-      return;
     case "request_expired":
-      await sendEmail({ to: user.email, subject: "Your request wasn't answered in time", kind: "request-expired", react: RequestExpiredEmail({ link: `${env().APP_URL}/seeker` }) });
       return;
     default:
       throw new Error(`Unknown email kind: ${payload.kind}`);

@@ -12,13 +12,12 @@ function Item({ label, value }: { label: string; value?: React.ReactNode }) {
   );
 }
 
-/** The member's own answers, read-only. The member ID and phone are private and only shown to the member. */
+/** The member's own answers, read-only. The member ID and phone are private and only shown to the member (a phone number is also emailed to Seekers who connect with the Guide). */
 export function ProfileView({ role, data, memberId, phone }: { role: Role; data: Record<string, unknown>; memberId: string | null; phone: { has: boolean; last4: string | null } }) {
   const d = data as Partial<SeekerProfileData & GuideProfileData>;
   return (
     <Card className="space-y-3">
       <dl className="space-y-2">
-        <Item label="Alias" value={d.alias} />
         <Item label="Member ID (private)" value={memberId} />
         {role === "seeker" ? (
           <>
@@ -30,8 +29,7 @@ export function ProfileView({ role, data, memberId, phone }: { role: Role; data:
             <Item label="Categories" value={d.categories?.map((c) => labelOf(CATEGORIES, c)).join(", ")} />
             <Item label="Role" value={d.jobTitle} />
             <Item label="About" value={d.about} />
-            <Item label="New Seekers per month" value={d.maxNewSeekersPerMonth} />
-            <Item label="Phone number" value={phone.has ? `Saved securely (ends ${phone.last4})` : "Not set"} />
+            <Item label="Phone number" value={phone.has ? `Saved securely (ends ${phone.last4}). Emailed to Seekers who connect with you.` : "Not provided. Seekers who connect with you get only your profile details."} />
           </>
         )}
         <Item label="Experience" value={d.totalYears !== undefined ? `${d.totalYears} years` : undefined} />

@@ -30,7 +30,6 @@ describe("hard filters", () => {
     const blockedByGuide = (await makeGuide()).user;
     const reported = (await makeGuide()).user;
     const pending = (await makeGuide()).user;
-    const full = (await makeGuide({ maxNewSeekersPerMonth: 1 })).user;
     const legacy = (await makeGuide()).user; // registered before the pilot: no member ID on file
 
     await db().update(guideProfiles).set({ matchingPaused: true }).where(eq(guideProfiles.userId, paused.id));
@@ -41,13 +40,10 @@ describe("hard filters", () => {
     const req = (guideId: string, status: string, approvedAt?: Date) =>
       db().insert(connectionRequests).values({ seekerId: seeker.id, guideId, status, tokenHash: randomUUID(), expiresAt: new Date(Date.now() + 86400000), approvedAt });
     await req(pending.id, "pending");
-    // Capacity: one Seeker already approved this month fills a guide with max 1.
-    const other = (await makeSeeker()).user;
-    await db().insert(connectionRequests).values({ seekerId: other.id, guideId: full.id, status: "approved", approvedAt: new Date(), tokenHash: randomUUID(), expiresAt: new Date(Date.now() + 86400000) });
 
     const ids = await candidateIds(seeker.id);
     expect(ids).toContain(ok.id);
-    for (const [name, g] of Object.entries({ paused, junior, otherCategory, suspended, blockedByGuide, reported, pending, full, legacy })) {
+    for (const [name, g] of Object.entries({ paused, junior, otherCategory, suspended, blockedByGuide, reported, pending, legacy })) {
       expect(ids, name).not.toContain(g.id);
     }
   });
@@ -87,7 +83,7 @@ describe("the Find guides run", () => {
     expect(view.status).toBe("done");
     expect(view.matches.length).toBe(5);
     expect(view.llmUsed).toBe(true);
-    expect(view.matches.every((m) => m.final && m.explanation.length > 10 && m.alias)).toBe(true);
+    expect(view.matches.every((m) => m.final && m.explanation.length > 10 && m.name)).toBe(true);
     expect(view.matches.map((m) => m.rank)).toEqual([1, 2, 3, 4, 5]);
     // scores are descending
     const scores = view.matches.map((m) => m.score);
@@ -190,5 +186,18 @@ describe("match ids stay stable when preliminary results become final", () => {
     const kept = after.filter((m) => idsBefore.has(m.guideId));
     expect(kept.length).toBeGreaterThan(0);
     expect(kept.every((m) => idsBefore.get(m.guideId) === m.id)).toBe(true);
+  });
+});
+
+describe("match cards after the approval flow was removed", () => {
+  it("offers 'connect' again for a Guide whose old request was declined, expired or cancelled", async () => {
+    const { getRunView } = await import("@/server/matching/view");
+    const { user: seeker } = await makeSeeker();
+    const g = (await makeGuide()).user;
+    const [run] = await db().insert(matchRuns).values({ seekerId: seeker.id, inputHash: randomUUID(), status: "done" }).returning();
+    await db().insert(matches).values({ runId: run!.id, seekerId: seeker.id, guideId: g.id, rank: 1, score: 0.9, explanation: "A fit", status: "final" });
+    await db().insert(connectionRequests).values({ seekerId: seeker.id, guideId: g.id, status: "cancelled", tokenHash: randomUUID(), expiresAt: new Date() });
+    const view = (await getRunView(run!.id, seeker.id))!;
+    expect(view.matches[0]!.connection).toBe("none");
   });
 });

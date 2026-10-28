@@ -57,6 +57,20 @@
       "when": 1792753471710,
       "tag": "0007_pilot_simple_profile",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793211923276,
+      "tag": "0008_guide_approval_removed",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793212943384,
+      "tag": "0009_phone_email_consent",
+      "breakpoints": true
     }
   ]
 }

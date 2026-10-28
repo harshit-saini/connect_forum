@@ -16,16 +16,16 @@ const data = (form: object, extra: object = {}) => ({ ...form, ...extra, consent
 
 describe("embedding documents", () => {
   it("are deterministic and exclude private and identifying data", () => {
-    const form = seekerForm({ alias: "SecretAlias99", query: "I want to move from engineering into product management." });
+    const form = seekerForm({ query: "I want to move from engineering into product management." });
     const doc = buildNeedsDoc(data(form) as unknown as SeekerProfileData);
     expect(doc).toBe(buildNeedsDoc(data(form) as unknown as SeekerProfileData));
-    for (const secret of ["SecretAlias99", form.memberId]) expect(doc).not.toContain(secret);
+    expect(doc).not.toContain(form.memberId);
     expect(doc).toContain("Category: Career Stagnation");
     expect(doc).toContain("product management");
 
-    const g = guideForm({ alias: "GuideAlias77" });
+    const g = guideForm();
     const offers = buildOffersDoc(data(g) as unknown as GuideProfileData);
-    for (const secret of ["GuideAlias77", g.memberId, "9876"]) expect(offers).not.toContain(secret);
+    for (const secret of [g.memberId, "9876"]) expect(offers).not.toContain(secret);
     expect(offers).toContain("Categories: Career Stagnation, Uncertainty");
   });
 });

@@ -32,7 +32,8 @@ export type SafetyResult = { ok: true } | { ok: false; message: string };
 
 /**
  * Reports or blocks `otherId` on behalf of `actorId`. Both remove the pair from future matching.
- * A block also cancels any pending request between them, and the reveal endpoint refuses a blocked pair.
+ * A block also cancels any request the old approval flow left pending between them, and the reveal endpoint
+ * refuses a blocked pair.
  */
 export async function applySafetyAction(args: { actorId: string; otherId: string; input: z.infer<typeof safetyInput> }): Promise<SafetyResult> {
   const { actorId, otherId, input } = args;
@@ -51,7 +52,7 @@ export async function applySafetyAction(args: { actorId: string; otherId: string
     const [b] = await tx.insert(blocks).values({ blockerId: actorId, blockedId: otherId }).onConflictDoNothing().returning({ id: blocks.id });
     await tx
       .update(connectionRequests)
-      .set({ status: "cancelled", decidedAt: new Date(), tokenUsedAt: new Date() })
+      .set({ status: "cancelled", decidedAt: new Date() })
       .where(and(eq(connectionRequests.status, "pending"), or(and(eq(connectionRequests.seekerId, actorId), eq(connectionRequests.guideId, otherId)), and(eq(connectionRequests.seekerId, otherId), eq(connectionRequests.guideId, actorId)))));
     if (b) await audit(tx, { action: "block.created", actorId, targetId: otherId, subjectType: "block", subjectId: b.id });
   });

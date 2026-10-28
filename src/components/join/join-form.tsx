@@ -6,7 +6,7 @@ import { FormProvider, useForm, type FieldValues, type Resolver } from "react-ho
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { CheckboxField, MultiCheckField, NumberField, RadioField, TextAreaField, TextField } from "@/components/form/controls";
-import { AliasField, PhoneField } from "@/components/form/special";
+import { PhoneField } from "@/components/form/special";
 import { CATEGORIES } from "@/config/taxonomy";
 import { DEFAULT_COUNTRY } from "@/lib/countries";
 import { formSchema, normalizeEmpty, type Role } from "@/schemas";
@@ -34,7 +34,7 @@ export function JoinForm({
   const editing = memberId !== null;
   const form = useForm<FieldValues>({
     defaultValues: {
-      ...(role === "guide" ? { categories: [], maxNewSeekersPerMonth: 3 } : {}),
+      ...(role === "guide" ? { categories: [] } : {}),
       ...initial,
       memberId: memberId ?? "",
       agree: editing,
@@ -45,13 +45,17 @@ export function JoinForm({
   const [pending, start] = useTransition();
   const [formError, setFormError] = useState<string | null>(null);
   const [phoneValue, setPhoneValue] = useState("");
+  const [removePhone, setRemovePhone] = useState(false);
+  const [phoneIncomplete, setPhoneIncomplete] = useState(false);
   const [phoneError, setPhoneError] = useState<string | undefined>();
 
   function onSubmit(values: FieldValues) {
     setFormError(null);
     setPhoneError(undefined);
+    // The number is optional, but a half-typed one must not be silently dropped.
+    if (phoneIncomplete) return setPhoneError("That number looks incomplete. Finish it, or clear the field to share only your profile details.");
     start(async () => {
-      const res = await saveProfileAction(role, normalizeEmpty(values), phoneValue || undefined);
+      const res = await saveProfileAction(role, normalizeEmpty(values), phoneValue || undefined, removePhone && !phoneValue);
       // On success the action redirects to the dashboard, so only failures come back here.
       if (!res || res.ok) return;
       for (const [path, message] of Object.entries(res.fieldErrors)) {
@@ -73,7 +77,6 @@ export function JoinForm({
           autoComplete="off"
           max={40}
         />
-        <AliasField />
 
         {role === "seeker" ? (
           <>
@@ -90,7 +93,7 @@ export function JoinForm({
         ) : (
           <>
             <MultiCheckField name="categories" label="Which categories can you help with?" options={CATEGORIES} />
-            <TextField name="jobTitle" label="Your current or last role" max={80} placeholder="e.g. Senior HR Manager" />
+            <TextField name="jobTitle" label="Your current or last role" hint="Shown to Seekers instead of your name. Use a role, not your name or employer." max={80} placeholder="e.g. Senior HR Manager" />
             <TextAreaField
               name="about"
               label="How can you help?"
@@ -105,10 +108,7 @@ export function JoinForm({
         <NumberField name="totalYears" label="Years of work experience" min={0} max={50} />
 
         {role === "guide" && (
-          <>
-            <NumberField name="maxNewSeekersPerMonth" label="New Seekers you can take each month" hint="1 to 10" min={1} max={10} />
-            <PhoneField last4={phone.last4} value={phoneValue} onChange={setPhoneValue} error={phoneError} defaultCountry={DEFAULT_COUNTRY} />
-          </>
+          <PhoneField last4={phone.last4} value={phoneValue} onChange={setPhoneValue} error={phoneError} defaultCountry={DEFAULT_COUNTRY} removed={removePhone} onRemovedChange={setRemovePhone} onIncompleteChange={setPhoneIncomplete} />
         )}
 
         {!editing && (

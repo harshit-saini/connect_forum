@@ -2,7 +2,7 @@ import "server-only";
 import { aliasedTable, and, count, desc, eq, ilike, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
 import { audit } from "@/server/audit";
 import { db } from "@/server/db/client";
-import { auditLog, faqEvents, guideProfiles, ratings, reports, seekerProfiles, sessions, userAliases, userRoles, users } from "@/server/db/schema";
+import { auditLog, faqEvents, guideProfiles, ratings, reports, seekerProfiles, sessions, userRoles, users } from "@/server/db/schema";
 import { sendEmail } from "@/server/email";
 import { GuideInviteEmail } from "@/server/email/templates/guide-invite";
 import { env } from "@/server/env";
@@ -23,23 +23,25 @@ export async function overview() {
   return { users: u!.n, guides: g!.n, seekers: s!.n, openReports: r!.n, suspended: sus!.n };
 }
 
-export type AdminUserRow = { id: string; email: string; alias: string | null; role: string | null; suspendedAt: Date | null; createdAt: Date; profileCompleted: boolean };
+export type AdminUserRow = { id: string; email: string; memberId: string | null; role: string | null; suspendedAt: Date | null; createdAt: Date; profileCompleted: boolean };
 
 export async function listUsers(args: { q?: string; status?: "all" | "suspended"; page: number }): Promise<{ rows: AdminUserRow[]; total: number }> {
   const filters: SQL[] = [isNull(users.deletedAt)];
-  if (args.q) filters.push(or(ilike(users.email, `%${args.q}%`), ilike(userAliases.alias, `%${args.q}%`))!);
+  if (args.q) filters.push(or(ilike(users.email, `%${args.q}%`), ilike(seekerProfiles.memberId, `%${args.q}%`), ilike(guideProfiles.memberId, `%${args.q}%`))!);
   if (args.status === "suspended") filters.push(isNotNull(users.suspendedAt));
   const where = and(...filters);
 
-  const base = db().select({ id: users.id }).from(users).leftJoin(userAliases, eq(userAliases.userId, users.id)).where(where);
+  const base = db().select({ id: users.id }).from(users)
+    .leftJoin(seekerProfiles, eq(seekerProfiles.userId, users.id))
+    .leftJoin(guideProfiles, eq(guideProfiles.userId, users.id))
+    .where(where);
   const [{ n }] = (await db().select({ n: count() }).from(base.as("t"))) as [{ n: number }];
   const rows = await db()
     .select({
-      id: users.id, email: users.email, alias: userAliases.alias, role: userRoles.role, suspendedAt: users.suspendedAt, createdAt: users.createdAt,
-      seekerDone: seekerProfiles.profileCompletedAt, guideDone: guideProfiles.profileCompletedAt,
+      id: users.id, email: users.email, role: userRoles.role, suspendedAt: users.suspendedAt, createdAt: users.createdAt,
+      seekerMember: seekerProfiles.memberId, guideMember: guideProfiles.memberId, seekerDone: seekerProfiles.profileCompletedAt, guideDone: guideProfiles.profileCompletedAt,
     })
     .from(users)
-    .leftJoin(userAliases, eq(userAliases.userId, users.id))
     .leftJoin(userRoles, eq(userRoles.userId, users.id))
     .leftJoin(seekerProfiles, eq(seekerProfiles.userId, users.id))
     .leftJoin(guideProfiles, eq(guideProfiles.userId, users.id))
@@ -47,7 +49,7 @@ export async function listUsers(args: { q?: string; status?: "all" | "suspended"
     .orderBy(desc(users.createdAt))
     .limit(page(args.page).limit)
     .offset(page(args.page).offset);
-  return { total: n, rows: rows.map((r) => ({ id: r.id, email: r.email, alias: r.alias, role: r.role, suspendedAt: r.suspendedAt, createdAt: r.createdAt, profileCompleted: Boolean(r.seekerDone || r.guideDone) })) };
+  return { total: n, rows: rows.map((r) => ({ id: r.id, email: r.email, memberId: r.seekerMember ?? r.guideMember ?? null, role: r.role, suspendedAt: r.suspendedAt, createdAt: r.createdAt, profileCompleted: Boolean(r.seekerDone || r.guideDone) })) };
 }
 
 export type AdminResult = { ok: true } | { ok: false; message: string };
@@ -84,24 +86,23 @@ export async function unsuspendUser(args: { adminId: string; userId: string }): 
   return { ok: true };
 }
 
-export type ReportRow = { id: string; reason: string; details: string | null; status: string; createdAt: Date; reporterAlias: string | null; reportedAlias: string | null; reportedId: string; reportedSuspended: boolean };
+export type ReportRow = { id: string; reason: string; details: string | null; status: string; createdAt: Date; reporterEmail: string | null; reportedEmail: string | null; reportedId: string; reportedSuspended: boolean };
 
 export async function listReports(status: "open" | "all", pageNo: number): Promise<{ rows: ReportRow[]; total: number }> {
-  const reporterAlias = aliasedTable(userAliases, "reporter_alias");
-  const reportedAlias = aliasedTable(userAliases, "reported_alias");
+  const reporter = aliasedTable(users, "reporter_user");
+  const reported = aliasedTable(users, "reported_user");
   const where = status === "open" ? eq(reports.status, "open") : undefined;
   const [{ n }] = (await db().select({ n: count() }).from(reports).where(where)) as [{ n: number }];
   const rows = await db()
-    .select({ id: reports.id, reason: reports.reason, details: reports.details, status: reports.status, createdAt: reports.createdAt, reporterAlias: reporterAlias.alias, reportedAlias: reportedAlias.alias, reportedId: reports.reportedId, suspendedAt: users.suspendedAt })
+    .select({ id: reports.id, reason: reports.reason, details: reports.details, status: reports.status, createdAt: reports.createdAt, reporterEmail: reporter.email, reportedEmail: reported.email, reportedId: reports.reportedId, suspendedAt: reported.suspendedAt })
     .from(reports)
-    .leftJoin(reporterAlias, eq(reporterAlias.userId, reports.reporterId))
-    .leftJoin(reportedAlias, eq(reportedAlias.userId, reports.reportedId))
-    .innerJoin(users, eq(users.id, reports.reportedId))
+    .leftJoin(reporter, eq(reporter.id, reports.reporterId))
+    .leftJoin(reported, eq(reported.id, reports.reportedId))
     .where(where)
     .orderBy(desc(reports.createdAt))
     .limit(page(pageNo).limit)
     .offset(page(pageNo).offset);
-  return { total: n, rows: rows.map(({ suspendedAt, ...r }) => ({ ...r, reportedSuspended: Boolean(suspendedAt) })) };
+  return { total: n, rows: rows.map((r) => ({ id: r.id, reason: r.reason, details: r.details, status: r.status, createdAt: r.createdAt, reporterEmail: r.reporterEmail, reportedEmail: r.reportedEmail, reportedId: r.reportedId, reportedSuspended: Boolean(r.suspendedAt) })) };
 }
 
 export async function reviewReport(adminId: string, reportId: string, outcome: "reviewed" | "dismissed"): Promise<AdminResult> {
@@ -111,36 +112,36 @@ export async function reviewReport(adminId: string, reportId: string, outcome: "
   return { ok: true };
 }
 
-export type AdminRatingRow = { id: string; score: number; review: string | null; createdAt: Date; guideAlias: string | null; seekerAlias: string | null };
+export type AdminRatingRow = { id: string; score: number; review: string | null; createdAt: Date; guideEmail: string | null; seekerEmail: string | null };
 
 /** Individual ratings and reviews: visible to admins only (Guides see aggregates; the matcher sees scores). */
 export async function listRatings(pageNo: number): Promise<{ rows: AdminRatingRow[]; total: number }> {
-  const guideAlias = aliasedTable(userAliases, "g_alias");
-  const seekerAlias = aliasedTable(userAliases, "s_alias");
+  const guideUser = aliasedTable(users, "g_user");
+  const seekerUser = aliasedTable(users, "s_user");
   const [{ n }] = (await db().select({ n: count() }).from(ratings)) as [{ n: number }];
   const rows = await db()
-    .select({ id: ratings.id, score: ratings.score, review: ratings.review, createdAt: ratings.createdAt, guideAlias: guideAlias.alias, seekerAlias: seekerAlias.alias })
+    .select({ id: ratings.id, score: ratings.score, review: ratings.review, createdAt: ratings.createdAt, guideEmail: guideUser.email, seekerEmail: seekerUser.email })
     .from(ratings)
-    .leftJoin(guideAlias, eq(guideAlias.userId, ratings.guideId))
-    .leftJoin(seekerAlias, eq(seekerAlias.userId, ratings.seekerId))
+    .leftJoin(guideUser, eq(guideUser.id, ratings.guideId))
+    .leftJoin(seekerUser, eq(seekerUser.id, ratings.seekerId))
     .orderBy(desc(ratings.createdAt))
     .limit(page(pageNo).limit)
     .offset(page(pageNo).offset);
   return { total: n, rows };
 }
 
-export type AuditRow = { id: string; at: Date; action: string; actorAlias: string | null; targetAlias: string | null; subjectType: string | null; metadata: Record<string, unknown> };
+export type AuditRow = { id: string; at: Date; action: string; actorEmail: string | null; targetEmail: string | null; subjectType: string | null; metadata: Record<string, unknown> };
 
 export async function listAudit(args: { action?: string; page: number }): Promise<{ rows: AuditRow[]; total: number; actions: string[] }> {
-  const actorAlias = aliasedTable(userAliases, "a_alias");
-  const targetAlias = aliasedTable(userAliases, "t_alias");
+  const actor = aliasedTable(users, "a_user");
+  const target = aliasedTable(users, "t_user");
   const where = args.action ? eq(auditLog.action, args.action) : undefined;
   const [{ n }] = (await db().select({ n: count() }).from(auditLog).where(where)) as [{ n: number }];
   const rows = await db()
-    .select({ id: auditLog.id, at: auditLog.at, action: auditLog.action, actorAlias: actorAlias.alias, targetAlias: targetAlias.alias, subjectType: auditLog.subjectType, metadata: auditLog.metadata })
+    .select({ id: auditLog.id, at: auditLog.at, action: auditLog.action, actorEmail: actor.email, targetEmail: target.email, subjectType: auditLog.subjectType, metadata: auditLog.metadata })
     .from(auditLog)
-    .leftJoin(actorAlias, eq(actorAlias.userId, auditLog.actorId))
-    .leftJoin(targetAlias, eq(targetAlias.userId, auditLog.targetId))
+    .leftJoin(actor, eq(actor.id, auditLog.actorId))
+    .leftJoin(target, eq(target.id, auditLog.targetId))
     .where(where)
     .orderBy(desc(auditLog.at))
     .limit(page(args.page).limit)

@@ -3,8 +3,10 @@ import { notFound } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { Card } from "@/components/ui/card";
+import { guideDisplayName } from "@/lib/display";
+import type { GuideProfileData } from "@/schemas";
 import { db } from "@/server/db/client";
-import { connectionRequests, userAliases } from "@/server/db/schema";
+import { connectionRequests, guideProfiles } from "@/server/db/schema";
 import { getOwnRating, RATING_EDIT_DAYS } from "@/server/ratings/service";
 import { requireCompletedProfile } from "@/server/viewer";
 import { RatingForm } from "./rating-form";
@@ -17,9 +19,9 @@ export default async function RatePage({ params }: { params: Promise<{ id: strin
   const { id } = await params;
   if (!z.uuid().safeParse(id).success) notFound();
   const [row] = await db()
-    .select({ status: connectionRequests.status, alias: userAliases.alias })
+    .select({ status: connectionRequests.status, data: guideProfiles.data })
     .from(connectionRequests)
-    .innerJoin(userAliases, eq(userAliases.userId, connectionRequests.guideId))
+    .innerJoin(guideProfiles, eq(guideProfiles.userId, connectionRequests.guideId))
     .where(and(eq(connectionRequests.id, id), eq(connectionRequests.seekerId, viewer.id)));
   if (!row) notFound();
 
@@ -28,11 +30,11 @@ export default async function RatePage({ params }: { params: Promise<{ id: strin
   return (
     <div className="mx-auto max-w-xl space-y-6">
       <div>
-        <h1 className="text-3xl font-semibold">How was {row.alias}?</h1>
+        <h1 className="text-3xl font-semibold">How was {guideDisplayName(row.data as unknown as GuideProfileData)}?</h1>
         <p className="mt-1 text-muted">Your rating and review are private. The Guide only ever sees an average, and only once they have at least 3 ratings.</p>
       </div>
       {row.status !== "approved" ? (
-        <Card><p className="text-sm text-muted">You can rate a Guide once they have approved your request.</p></Card>
+        <Card><p className="text-sm text-muted">You can rate a Guide once you have connected with them.</p></Card>
       ) : (
         <Card className="space-y-3">
           {own && <p className="text-sm text-muted">{locked ? "This rating can no longer be changed." : `You can change this until ${own.editableUntil.toLocaleDateString("en-GB", { day: "numeric", month: "short" })} (${RATING_EDIT_DAYS} days after you gave it).`}</p>}

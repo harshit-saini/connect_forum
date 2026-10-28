@@ -25,7 +25,7 @@ export async function submitRating(args: { seekerId: string; connectionId: strin
 
   const [req] = await db().select().from(connectionRequests).where(and(eq(connectionRequests.id, args.connectionId), eq(connectionRequests.seekerId, args.seekerId))).limit(1);
   if (!req) return { ok: false, code: "not_found", message: "That connection could not be found." };
-  if (req.status !== "approved") return { ok: false, code: "not_approved", message: "You can rate a Guide once they have approved your request." };
+  if (req.status !== "approved") return { ok: false, code: "not_approved", message: "You can rate a Guide once you have connected with them." };
 
   return db().transaction(async (tx) => {
     const [existing] = await tx.select().from(ratings).where(eq(ratings.connectionRequestId, req.id)).for("update");

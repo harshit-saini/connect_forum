@@ -11,5 +11,6 @@ import { openRow } from "./index";
  */
 export async function decryptPhoneForReveal(db: Pick<Db, "select">, guideId: string): Promise<string | null> {
   const [row] = await db.select().from(phoneVault).where(eq(phoneVault.guideId, guideId)).limit(1);
-  return row ? openRow(row, guideId) : null;
+  // No consent to send it means no number: legacy rows stay sealed until the Guide saves a number again.
+  return row?.emailConsentAt ? openRow(row, guideId) : null;
 }

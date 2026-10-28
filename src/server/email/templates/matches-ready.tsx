@@ -1,16 +1,16 @@
 import { Button, Heading, Text } from "@react-email/components";
 import { EmailLayout } from "./layout";
 
-export function MatchesReadyEmail({ matches, link }: { matches: Array<{ alias: string; why: string }>; link: string }) {
+export function MatchesReadyEmail({ matches, link }: { matches: Array<{ name: string; why: string }>; link: string }) {
   return (
     <EmailLayout preview="Your top Guide matches are ready">
       <Heading as="h1" style={{ fontSize: 22, margin: "0 0 12px" }}>
         Your top matches
       </Heading>
-      <Text>We found Guides who could help. Everyone stays anonymous until a Guide approves a connection.</Text>
-      {matches.map((m) => (
-        <Text key={m.alias} style={{ margin: "8px 0" }}>
-          <strong>{m.alias}</strong>
+      <Text>We found Guides who could help. Seekers stay anonymous: Guides only see your category and question.</Text>
+      {matches.map((m, i) => (
+        <Text key={i} style={{ margin: "8px 0" }}>
+          <strong>{m.name}</strong>
           <br />
           {m.why}
         </Text>

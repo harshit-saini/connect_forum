@@ -1,28 +1,29 @@
 import "server-only";
-import { and, count, desc, eq, gte, lt, sql } from "drizzle-orm";
+import { and, count, desc, eq, sql } from "drizzle-orm";
 import { optionalFreeText } from "@/schemas/common";
-import type { SeekerProfileData } from "@/schemas";
+import type { GuideProfileData } from "@/schemas";
 import { audit } from "@/server/audit";
+import { guideDisplayName } from "@/lib/display";
 import { db } from "@/server/db/client";
-import { blocks, connectionRequests, guideProfiles, matches, reports, seekerProfiles, unlocks, userAliases, users } from "@/server/db/schema";
+import { blocks, connectionRequests, guideProfiles, matches, reports, unlocks, users } from "@/server/db/schema";
 import { env } from "@/server/env";
 import { queue } from "@/server/jobs";
-import { publicSeeker, type PublicSeeker } from "@/server/matching/public";
-import { bumpCounter, GUIDE_POOL_VERSION } from "@/server/profile/counters";
-import { generateToken, hashToken, looksLikeToken } from "@/server/tokens";
-import { sealToString } from "@/server/vault";
 
-export const REQUEST_TTL_DAYS = 7;
 export const MAX_NOTE = 300;
 
-type Fail = { ok: false; code: "not_found" | "unavailable" | "limit" | "duplicate" | "note"; message: string };
+type Fail = { ok: false; code: "not_found" | "unavailable" | "duplicate" | "note"; message: string };
 
 function uniqueViolation(err: unknown) {
   const e = err as { code?: string; cause?: { code?: string } };
   return e?.code === "23505" || e?.cause?.code === "23505";
 }
 
-/** Creates a pending request for a match and queues the Guide's review e-mail. */
+/**
+ * Connects a Seeker with the Guide of one of their matches, right away: there is no approval step.
+ * Records an approved connection and its unlock, then queues the e-mail with the Guide's details to the
+ * Seeker, a heads-up to the Guide, and the later rating reminder. The partial unique index on the pair
+ * makes a double click (or two tabs) create exactly one connection and one set of e-mails.
+ */
 export async function createRequest(args: { seekerId: string; matchId: string; note?: string }): Promise<{ ok: true; requestId: string } | Fail> {
   const { seekerId, matchId } = args;
 
@@ -38,131 +39,54 @@ export async function createRequest(args: { seekerId: string; matchId: string; n
     .from(users)
     .innerJoin(guideProfiles, eq(guideProfiles.userId, users.id))
     .where(eq(users.id, m.guideId));
-  const unavailable: Fail = { ok: false, code: "unavailable", message: "This Guide isn't taking new requests right now." };
+  const unavailable: Fail = { ok: false, code: "unavailable", message: "This Guide isn't available to connect right now." };
   if (!guide || guide.suspendedAt || guide.deletedAt || guide.gDeleted || !guide.completed || guide.paused) return unavailable;
 
   const [{ n: blocked }] = await db().select({ n: count() }).from(blocks).where(sql`(${blocks.blockerId} = ${seekerId} and ${blocks.blockedId} = ${m.guideId}) or (${blocks.blockerId} = ${m.guideId} and ${blocks.blockedId} = ${seekerId})`);
   const [{ n: reported }] = await db().select({ n: count() }).from(reports).where(sql`(${reports.reporterId} = ${seekerId} and ${reports.reportedId} = ${m.guideId}) or (${reports.reporterId} = ${m.guideId} and ${reports.reportedId} = ${seekerId})`);
   if (blocked > 0 || reported > 0) return unavailable;
 
-  const [{ n: pending }] = await db().select({ n: count() }).from(connectionRequests).where(and(eq(connectionRequests.seekerId, seekerId), eq(connectionRequests.status, "pending")));
-  const max = env().MAX_PENDING_REQUESTS;
-  if (pending >= max) return { ok: false, code: "limit", message: `You can have up to ${max} pending requests at a time. Wait for a reply before sending another.` };
-
-  const token = generateToken();
-  const expiresAt = new Date(Date.now() + REQUEST_TTL_DAYS * 86_400_000);
   try {
     const requestId = await db().transaction(async (tx) => {
-      const [row] = await tx.insert(connectionRequests).values({ seekerId, guideId: m.guideId, matchId, note, tokenHash: hashToken(token), expiresAt }).returning({ id: connectionRequests.id });
-      await audit(tx, { action: "connection.requested", actorId: seekerId, targetId: m.guideId, subjectType: "connection_request", subjectId: row!.id });
-      // The raw token exists only in this sealed job payload until the e-mail is sent, then it is scrubbed.
-      await queue().enqueue(tx, "send_email", { kind: "connection_request", userId: m.guideId, requestId: row!.id, sealedToken: sealToString(token, row!.id) }, { idempotencyKey: `req_email:${row!.id}` });
-      return row!.id;
+      const now = new Date();
+      const [row] = await tx.insert(connectionRequests).values({ seekerId, guideId: m.guideId, matchId, note, status: "approved", decidedAt: now, approvedAt: now }).returning({ id: connectionRequests.id });
+      const id = row!.id;
+      const [unlock] = await tx.insert(unlocks).values({ seekerId, guideId: m.guideId, connectionRequestId: id }).onConflictDoNothing().returning({ id: unlocks.id });
+      await audit(tx, { action: "connection.requested", actorId: seekerId, targetId: m.guideId, subjectType: "connection_request", subjectId: id });
+      await audit(tx, { action: "connection.approved", actorId: seekerId, targetId: m.guideId, subjectType: "connection_request", subjectId: id });
+      if (unlock) await audit(tx, { action: "unlock.created", actorId: seekerId, targetId: m.guideId, subjectType: "unlock", subjectId: unlock.id });
+      // Ids only: the Guide's number is decrypted when the first e-mail is sent, never stored in a job.
+      await queue().enqueue(tx, "send_email", { kind: "guide_details", userId: seekerId, requestId: id }, { idempotencyKey: `guide_details:${id}` });
+      await queue().enqueue(tx, "send_email", { kind: "guide_notified", userId: m.guideId, requestId: id }, { idempotencyKey: `guide_notified:${id}` });
+      // "How was your Guide?" goes out RATING_DELAY_DAYS later (any worker run or the daily sweep sends it).
+      await queue().enqueue(tx, "rating_reminder", { userId: seekerId, requestId: id }, { runAt: new Date(now.getTime() + env().RATING_DELAY_DAYS * 86_400_000), idempotencyKey: `rating_reminder:${id}` });
+      return id;
     });
     return { ok: true, requestId };
   } catch (err) {
-    if (uniqueViolation(err)) return { ok: false, code: "duplicate", message: "You already have an open request with this Guide." };
+    if (uniqueViolation(err)) return { ok: false, code: "duplicate", message: "You are already connected with this Guide." };
     throw err;
   }
 }
 
-export type ReviewState =
-  | { state: "invalid" }
-  | { state: "expired" }
-  | { state: "answered"; outcome: "approved" | "declined" | "expired" | "cancelled" }
-  | { state: "open"; requestId: string; tokenHash: string; seekerAlias: string; seeker: PublicSeeker; note: string | null; expiresAt: Date };
-
-/** Read-only lookup for the review page. Never consumes the token, so link scanners are harmless. */
-export async function loadReview(token: string): Promise<ReviewState> {
-  if (!looksLikeToken(token)) return { state: "invalid" };
-  const tokenHash = hashToken(token);
-  const [r] = await db().select().from(connectionRequests).where(eq(connectionRequests.tokenHash, tokenHash)).limit(1);
-  if (!r) return { state: "invalid" };
-  if (r.status !== "pending" || r.tokenUsedAt) return { state: "answered", outcome: (r.status === "pending" ? "approved" : r.status) as "approved" | "declined" | "expired" | "cancelled" };
-  if (r.expiresAt.getTime() < Date.now()) return { state: "expired" };
-
-  const [profile] = await db().select().from(seekerProfiles).where(eq(seekerProfiles.userId, r.seekerId)).limit(1);
-  const [alias] = await db().select().from(userAliases).where(eq(userAliases.userId, r.seekerId)).limit(1);
-  if (!profile || !alias) return { state: "invalid" };
-  return { state: "open", requestId: r.id, tokenHash, seekerAlias: alias.alias, seeker: publicSeeker(profile.data as unknown as SeekerProfileData), note: r.note, expiresAt: r.expiresAt };
-}
-
-export type DecideResult =
-  | { ok: true; outcome: "approved" | "declined" }
-  | { ok: false; code: "invalid" | "expired" | "answered" | "unavailable" | "capacity"; message: string };
-
-/**
- * Records the Guide's decision. The request row is locked, the token must still be unused and
- * unexpired, and everything (status, unlock, audit, e-mails, capacity) commits atomically.
- */
-export async function decide(token: string, decision: "approve" | "decline"): Promise<DecideResult> {
-  if (!looksLikeToken(token)) return { ok: false, code: "invalid", message: "This link isn't valid." };
-  const tokenHash = hashToken(token);
-
-  return db().transaction(async (tx) => {
-    const locked = await tx.execute(sql`select id from connection_requests where token_hash = ${tokenHash} for update`);
-    const lockedId = (locked as unknown as { rows: { id: string }[] }).rows[0]?.id;
-    if (!lockedId) return { ok: false, code: "invalid", message: "This link isn't valid." } as const;
-    const [r] = await tx.select().from(connectionRequests).where(eq(connectionRequests.id, lockedId));
-    if (!r) return { ok: false, code: "invalid", message: "This link isn't valid." } as const;
-
-    if (r.status !== "pending" || r.tokenUsedAt) return { ok: false, code: "answered", message: "You've already responded to this request." } as const;
-    if (r.expiresAt.getTime() < Date.now()) return { ok: false, code: "expired", message: "This request has expired." } as const;
-
-    const now = new Date();
-    if (decision === "decline") {
-      await tx.update(connectionRequests).set({ status: "declined", decidedAt: now, tokenUsedAt: now }).where(eq(connectionRequests.id, r.id));
-      await audit(tx, { action: "connection.declined", actorId: r.guideId, targetId: r.seekerId, subjectType: "connection_request", subjectId: r.id });
-      await queue().enqueue(tx, "send_email", { kind: "request_declined", userId: r.seekerId, requestId: r.id }, { idempotencyKey: `req_declined:${r.id}` });
-      return { ok: true, outcome: "declined" } as const;
-    }
-
-    const [guide] = await tx
-      .select({ suspendedAt: users.suspendedAt, deletedAt: users.deletedAt, max: guideProfiles.maxNewSeekersPerMonth })
-      .from(users)
-      .innerJoin(guideProfiles, eq(guideProfiles.userId, users.id))
-      .where(eq(users.id, r.guideId));
-    if (!guide || guide.suspendedAt || guide.deletedAt) return { ok: false, code: "unavailable", message: "This request can no longer be approved." } as const;
-
-    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    const [{ n: approvedThisMonth }] = await tx.select({ n: count() }).from(connectionRequests).where(and(eq(connectionRequests.guideId, r.guideId), eq(connectionRequests.status, "approved"), gte(connectionRequests.approvedAt, monthStart)));
-    if (guide.max !== null && approvedThisMonth >= guide.max) {
-      return { ok: false, code: "capacity", message: `You've reached your limit of ${guide.max} new Seekers this month. You can raise it in your profile settings.` } as const;
-    }
-
-    await tx.update(connectionRequests).set({ status: "approved", decidedAt: now, approvedAt: now, tokenUsedAt: now }).where(eq(connectionRequests.id, r.id));
-    const [unlock] = await tx.insert(unlocks).values({ seekerId: r.seekerId, guideId: r.guideId, connectionRequestId: r.id }).onConflictDoNothing().returning({ id: unlocks.id });
-    await audit(tx, { action: "connection.approved", actorId: r.guideId, targetId: r.seekerId, subjectType: "connection_request", subjectId: r.id });
-    if (unlock) await audit(tx, { action: "unlock.created", actorId: r.guideId, targetId: r.seekerId, subjectType: "unlock", subjectId: unlock.id });
-    await bumpCounter(tx, GUIDE_POOL_VERSION); // the Guide's remaining capacity changed
-    await queue().enqueue(tx, "send_email", { kind: "request_approved", userId: r.seekerId, requestId: r.id }, { idempotencyKey: `req_approved:${r.id}` });
-    // "How was your Guide?" goes out RATING_DELAY_DAYS later (any worker run or the daily sweep sends it).
-    await queue().enqueue(tx, "rating_reminder", { userId: r.seekerId, requestId: r.id }, { runAt: new Date(now.getTime() + env().RATING_DELAY_DAYS * 86_400_000), idempotencyKey: `rating_reminder:${r.id}` });
-    return { ok: true, outcome: "approved" } as const;
-  });
-}
-
-/** Expires overdue pending requests and tells the Seekers (generically). Idempotent. */
-export async function expireRequests(): Promise<number> {
+/** Closes requests left pending by the old approval flow (nobody can answer them any more). Idempotent. */
+export async function closeLegacyPending(): Promise<number> {
   const rows = await db()
     .update(connectionRequests)
-    .set({ status: "expired", decidedAt: new Date() })
-    .where(and(eq(connectionRequests.status, "pending"), lt(connectionRequests.expiresAt, new Date())))
-    .returning({ id: connectionRequests.id, seekerId: connectionRequests.seekerId, guideId: connectionRequests.guideId });
-  for (const r of rows) {
-    await audit(db(), { action: "connection.expired", targetId: r.guideId, actorId: r.seekerId, subjectType: "connection_request", subjectId: r.id });
-    await queue().enqueue(db(), "send_email", { kind: "request_expired", userId: r.seekerId, requestId: r.id }, { idempotencyKey: `req_expired:${r.id}` });
-  }
+    .set({ status: "cancelled", decidedAt: new Date() })
+    .where(eq(connectionRequests.status, "pending"))
+    .returning({ id: connectionRequests.id });
   return rows.length;
 }
 
-export type SeekerConnection = { id: string; alias: string; status: string; note: string | null; createdAt: Date; expiresAt: Date; approvedAt: Date | null };
+export type SeekerConnection = { id: string; name: string; status: string; note: string | null; createdAt: Date; approvedAt: Date | null };
 
 export async function listSeekerConnections(seekerId: string): Promise<SeekerConnection[]> {
-  return db()
-    .select({ id: connectionRequests.id, alias: userAliases.alias, status: connectionRequests.status, note: connectionRequests.note, createdAt: connectionRequests.createdAt, expiresAt: connectionRequests.expiresAt, approvedAt: connectionRequests.approvedAt })
+  const rows = await db()
+    .select({ id: connectionRequests.id, data: guideProfiles.data, status: connectionRequests.status, note: connectionRequests.note, createdAt: connectionRequests.createdAt, approvedAt: connectionRequests.approvedAt })
     .from(connectionRequests)
-    .innerJoin(userAliases, eq(userAliases.userId, connectionRequests.guideId))
+    .innerJoin(guideProfiles, eq(guideProfiles.userId, connectionRequests.guideId))
     .where(eq(connectionRequests.seekerId, seekerId))
     .orderBy(desc(connectionRequests.createdAt));
+  return rows.map(({ data, ...r }) => ({ ...r, name: guideDisplayName(data as unknown as GuideProfileData) }));
 }

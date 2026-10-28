@@ -6,11 +6,10 @@ import { redact } from "@/server/logging/logger";
 export type AuditAction =
   | "connection.requested"
   | "connection.approved"
-  | "connection.declined"
-  | "connection.expired"
   | "unlock.created"
   | "phone.revealed"
   | "phone.reveal_denied"
+  | "phone.emailed"
   | "user.suspended"
   | "user.unsuspended"
   | "user.deleted"

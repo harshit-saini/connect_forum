@@ -13,24 +13,24 @@ function Chips({ items, label }: { items: string[]; label: string }) {
   );
 }
 
-const CONNECTION_LABEL: Record<Match["connection"], string | null> = {
-  none: null,
-  pending: "Request sent",
-  approved: "Approved",
-  declined: "Declined",
-  expired: "Request expired",
-};
+/** Any earlier connection with this Guide means the pair is taken; only an approved one has had details sent. */
+const CONNECTION_LABEL: Partial<Record<string, string>> = { approved: "Details sent" };
+
+function connectionLabel(connection: string): string | null {
+  if (connection === "none") return null;
+  return CONNECTION_LABEL[connection] ?? "Not available";
+}
 
 export function MatchCardView({ match, action, ai = false }: { match: Match; action?: React.ReactNode; ai?: boolean }) {
   const { guide } = match;
-  const status = CONNECTION_LABEL[match.connection];
+  const status = connectionLabel(match.connection);
   return (
     <Card className="space-y-3">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h3 className="text-lg font-semibold">{match.alias}</h3>
+          <h3 className="text-lg font-semibold">{match.name}</h3>
           {ai && <span className="mt-0.5 inline-block rounded-full border border-border px-2 py-0.5 text-xs text-muted">AI match</span>}
-          <p className="text-sm text-muted">{guide.title} · {guide.years} yrs</p>
+          <p className="text-sm text-muted">{guide.years} years of experience</p>
         </div>
         <div className="text-right">
           <p className="text-2xl font-semibold text-primary" aria-label={`Match score ${match.score} out of 100`}>{match.score}</p>
@@ -54,7 +54,7 @@ export function MatchCardView({ match, action, ai = false }: { match: Match; act
         {status && <span className="rounded-full border border-border px-3 py-1 text-xs font-medium">{status}</span>}
         {!status && action}
       </div>
-      <div className="border-t border-border pt-2"><SeekerSafety target={{ kind: "match", id: match.matchId }} who={match.alias} /></div>
+      <div className="border-t border-border pt-2"><SeekerSafety target={{ kind: "match", id: match.matchId }} who={match.name} /></div>
     </Card>
   );
 }

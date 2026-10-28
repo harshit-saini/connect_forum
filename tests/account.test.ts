@@ -2,14 +2,11 @@ import { and, eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "@/server/db/client";
-import { auditLog, connectionRequests, counters, matchRuns, matches, phoneVault, profileEmbeddings, ratings, rateLimits, sessions, users } from "@/server/db/schema";
+import { auditLog, connectionRequests, counters, phoneVault, profileEmbeddings, ratings, rateLimits, sessions, users } from "@/server/db/schema";
 import { buildExport, deleteAccount } from "@/server/account";
-import { createRequest, decide } from "@/server/connections/service";
 import { processJobs } from "@/server/jobs/worker";
 import { submitRating } from "@/server/ratings/service";
-import { devOutbox } from "@/server/db/schema";
-import { desc } from "drizzle-orm";
-import { makeGuide, makeSeeker } from "./fixtures";
+import { connectedPair as connect } from "./fixtures";
 
 const PHONE_DIGITS = "9876543210";
 const viewerRef: { current: unknown } = { current: null };
@@ -24,18 +21,10 @@ beforeAll(async () => {
 });
 
 async function connectedPair() {
-  const seeker = await makeSeeker();
-  const guide = await makeGuide();
-  const [run] = await db().insert(matchRuns).values({ seekerId: seeker.user.id, inputHash: randomUUID(), status: "done" }).returning();
-  const [m] = await db().insert(matches).values({ runId: run!.id, seekerId: seeker.user.id, guideId: guide.user.id, rank: 1, score: 0.9, explanation: "A fit", status: "final" }).returning();
-  const r = await createRequest({ seekerId: seeker.user.id, matchId: m!.id, note: "Hello there" });
-  if (!r.ok) throw new Error("x");
-  await processJobs({ maxMs: 20_000 });
-  const mail = (await db().select().from(devOutbox).where(eq(devOutbox.to, guide.user.email)).orderBy(desc(devOutbox.createdAt)))[0]!;
-  await decide(/\/review\/([A-Za-z0-9_-]{43})/.exec(mail.text)![1]!, "approve");
-  await submitRating({ seekerId: seeker.user.id, connectionId: r.requestId, score: 5, review: "Very helpful indeed" });
+  const { seeker, guide, requestId } = await connect({ note: "Hello there" });
+  await submitRating({ seekerId: seeker.user.id, connectionId: requestId, score: 5, review: "Very helpful indeed" });
   await processJobs({ maxMs: 20_000 }); // embeddings
-  return { seeker, guide, requestId: r.requestId };
+  return { seeker, guide, requestId };
 }
 
 describe("data export", () => {
@@ -50,11 +39,11 @@ describe("data export", () => {
     expect(json).not.toContain(p.seeker.user.email); // the counterpart's email is never exported
     expect(json).not.toContain("Very helpful indeed"); // a Guide never sees individual reviews, not even in an export
     expect(guideExport!.ratingsReceived).toEqual({ count: 1, average: null, needed: 2 });
-    expect(guideExport!.requests[0]).toMatchObject({ direction: "received", with: p.seeker.form.alias, status: "approved" });
+    expect(guideExport!.requests[0]).toMatchObject({ direction: "received", with: "Seeker · Career Stagnation", status: "approved" });
     expect(json).not.toContain("Hello there"); // the Seeker's note to the Guide stays with the Seeker's data
 
     const seekerExport = await buildExport(p.seeker.user.id);
-    expect(seekerExport!.ratingsGiven[0]).toMatchObject({ score: 5, review: "Very helpful indeed", guideAlias: p.guide.form.alias });
+    expect(seekerExport!.ratingsGiven[0]).toMatchObject({ score: 5, review: "Very helpful indeed", guide: p.guide.form.jobTitle });
     expect(seekerExport!.requests[0]).toMatchObject({ direction: "sent", note: "Hello there" });
     expect(seekerExport!.matches).toHaveLength(1);
     expect(JSON.stringify(seekerExport)).not.toContain(PHONE_DIGITS);

@@ -54,13 +54,14 @@ export const connectionRequests = pgTable(
     seekerId: uuid("seeker_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     guideId: uuid("guide_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     matchId: uuid("match_id").references(() => matches.id, { onDelete: "set null" }),
-    /** pending | approved | declined | expired | cancelled */
+    /** approved for every new connection. pending | declined | expired | cancelled only exist on rows from the old approval flow. */
     status: text("status").notNull().default("pending"),
     note: text("note"),
-    /** SHA-256 of the single-use review token. The token itself is never stored. */
-    tokenHash: text("token_hash").notNull(),
+    /** Legacy (approval flow): unused now and null on new rows. */
+    tokenHash: text("token_hash"),
     tokenUsedAt: timestamp("token_used_at", { withTimezone: true }),
-    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /** Legacy (approval flow): unused now and null on new rows. */
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     decidedAt: timestamp("decided_at", { withTimezone: true }),
     approvedAt: timestamp("approved_at", { withTimezone: true }),
@@ -74,7 +75,7 @@ export const connectionRequests = pgTable(
   ],
 );
 
-/** Grants one Seeker the right to see one Guide's number. Created on approval. */
+/** Grants one Seeker the right to see one Guide's number. Created together with the connection. */
 export const unlocks = pgTable(
   "unlocks",
   {

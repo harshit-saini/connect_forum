@@ -50,8 +50,8 @@ describe("normalizeCompany", () => {
 });
 
 describe("schemas apply screening", () => {
-  const seeker = { alias: "Curious Falcon", memberId: "seek-1001", category: "uncertainty", query: "I am not sure what to do next in my career.", totalYears: 4, agree: true };
-  const guide = { alias: "Steady Maple", memberId: "guide-1001", categories: ["uncertainty"], jobTitle: "Manager", totalYears: 10, about: "I have helped many people choose their next step.", maxNewSeekersPerMonth: 3, agree: true };
+  const seeker = { memberId: "seek-1001", category: "uncertainty", query: "I am not sure what to do next in my career.", totalYears: 4, agree: true };
+  const guide = { memberId: "guide-1001", categories: ["uncertainty"], jobTitle: "Manager", totalYears: 10, about: "I have helped many people choose their next step.", agree: true };
 
   it("accepts a complete seeker form and normalises the member ID", () => {
     const r = seekerFormSchema.safeParse(seeker);
@@ -61,16 +61,23 @@ describe("schemas apply screening", () => {
     expect(seekerFormSchema.safeParse({ ...seeker, query: seeker.query + " email me at a@b.com" }).success).toBe(false);
     expect(guideFormSchema.safeParse({ ...guide, about: guide.about + " call me on 9876543210" }).success).toBe(false);
   });
-  it("requires the consent box, a valid alias and a known category", () => {
-    const r = seekerFormSchema.safeParse({ ...seeker, alias: "ab", agree: false, category: "astrology" });
+  it("requires the consent box and a known category", () => {
+    const r = seekerFormSchema.safeParse({ ...seeker, agree: false, category: "astrology" });
     expect(r.success).toBe(false);
     const paths = r.success ? [] : r.error.issues.map((i) => i.path.join("."));
-    expect(paths).toEqual(expect.arrayContaining(["alias", "agree", "category"]));
+    expect(paths).toEqual(expect.arrayContaining(["agree", "category"]));
   });
   it("limits guides to the four pilot categories and at least one", () => {
     expect(guideFormSchema.safeParse({ ...guide, categories: [] }).success).toBe(false);
     expect(guideFormSchema.safeParse({ ...guide, categories: ["layoff_unemployment", "career_stagnation", "upskilling_training", "uncertainty"] }).success).toBe(true);
     expect(guideFormSchema.safeParse({ ...guide, categories: ["resume_review"] }).success).toBe(false);
+  });
+  it("requires a Guide's role title to be a role, not a name or a staff-sounding label", () => {
+    const withTitle = (jobTitle: string) => guideFormSchema.safeParse({ ...guide, jobTitle });
+    expect(withTitle("Senior HR Manager").success).toBe(true);
+    expect(withTitle("My name is Rahul Sharma").success).toBe(false);
+    expect(withTitle("Mr. Rahul Sharma").success).toBe(false);
+    for (const t of ["Connect Support", "Admin", "Official helper"]) expect(withTitle(t).success, t).toBe(false);
   });
   it("rejects a malformed member ID", () => {
     expect(seekerFormSchema.safeParse({ ...seeker, memberId: "!!" }).success).toBe(false);

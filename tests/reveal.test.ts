@@ -2,17 +2,12 @@ import { and, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "@/server/db/client";
-import { auditLog, blocks, connectionRequests, jobs, matchRuns, matches, rateLimits, reports, unlocks, users } from "@/server/db/schema";
-import { createRequest, decide } from "@/server/connections/service";
+import { auditLog, blocks, connectionRequests, jobs, phoneVault, rateLimits, reports, unlocks, users } from "@/server/db/schema";
+import { createRequest } from "@/server/connections/service";
 import { revealNumber } from "@/server/connections/reveal";
 import { findCandidates, loadSeekerContext } from "@/server/matching/candidates";
-import { processJobs } from "@/server/jobs/worker";
 import { applySafetyAction, resolveSeekerTarget } from "@/server/safety/service";
-import { devOutbox } from "@/server/db/schema";
-import { desc } from "drizzle-orm";
-import { makeGuide, makeSeeker } from "./fixtures";
-
-const PHONE = "+919876543210";
+import { connectedPair, makeGuide, makeMatch, makeSeeker, PHONE } from "./fixtures";
 
 const viewerRef: { current: unknown } = { current: null };
 vi.mock("@/server/viewer", () => ({ getViewer: async () => viewerRef.current }));
@@ -26,18 +21,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** A Seeker who has connected with a Guide (the connection is approved straight away). */
 async function approvedPair() {
-  const seeker = await makeSeeker();
-  const guide = await makeGuide();
-  const [run] = await db().insert(matchRuns).values({ seekerId: seeker.user.id, inputHash: randomUUID(), status: "done" }).returning();
-  const [m] = await db().insert(matches).values({ runId: run!.id, seekerId: seeker.user.id, guideId: guide.user.id, rank: 1, score: 0.9, status: "final" }).returning();
-  const r = await createRequest({ seekerId: seeker.user.id, matchId: m!.id });
-  if (!r.ok) throw new Error("request failed");
-  await processJobs({ maxMs: 20_000 });
-  const mail = (await db().select().from(devOutbox).where(eq(devOutbox.to, guide.user.email)).orderBy(desc(devOutbox.createdAt)))[0]!;
-  const token = /\/review\/([A-Za-z0-9_-]{43})/.exec(mail.text)![1]!;
-  expect(await decide(token, "approve")).toEqual({ ok: true, outcome: "approved" });
-  return { seeker, guide, requestId: r.requestId, matchId: m!.id };
+  const p = await connectedPair();
+  return { seeker: p.seeker, guide: p.guide, requestId: p.requestId, matchId: p.matchId };
 }
 
 describe("revealNumber", () => {
@@ -69,14 +56,18 @@ describe("revealNumber", () => {
     expect(await denied(stranger.user.id, a.requestId)).toEqual({ ok: false, code: "not_found" });
     expect(await denied(a.seeker.user.id, randomUUID())).toEqual({ ok: false, code: "not_found" });
 
-    // pending (not yet approved)
+    // a row from the old approval flow that was never approved
     const seeker = await makeSeeker();
     const guide = await makeGuide();
-    const [run] = await db().insert(matchRuns).values({ seekerId: seeker.user.id, inputHash: randomUUID(), status: "done" }).returning();
-    const [m] = await db().insert(matches).values({ runId: run!.id, seekerId: seeker.user.id, guideId: guide.user.id, rank: 1, score: 0.5, status: "final" }).returning();
-    const pending = await createRequest({ seekerId: seeker.user.id, matchId: m!.id });
-    if (!pending.ok) throw new Error("x");
-    expect(await denied(seeker.user.id, pending.requestId)).toEqual({ ok: false, code: "not_approved" });
+    const [legacy] = await db().insert(connectionRequests).values({ seekerId: seeker.user.id, guideId: guide.user.id, status: "pending", tokenHash: randomUUID(), expiresAt: new Date(Date.now() + 1e9) }).returning();
+    expect(await denied(seeker.user.id, legacy!.id)).toEqual({ ok: false, code: "not_approved" });
+
+    // the Guide gave no number (or removed it): nothing to reveal
+    const none = await connectedPair({ phone: null });
+    expect(await denied(none.seeker.user.id, none.requestId)).toEqual({ ok: false, code: "unavailable" });
+    const removed = await approvedPair();
+    await db().delete(phoneVault).where(eq(phoneVault.guideId, removed.guide.user.id));
+    expect(await denied(removed.seeker.user.id, removed.requestId)).toEqual({ ok: false, code: "unavailable" });
 
     // approved but the unlock row is gone
     const b = await approvedPair();
@@ -97,7 +88,7 @@ describe("revealNumber", () => {
     expect(await denied(e.seeker.user.id, e.requestId)).toEqual({ ok: false, code: "unavailable" });
 
     const denials = await db().select().from(auditLog).where(eq(auditLog.action, "phone.reveal_denied"));
-    expect(denials.length).toBeGreaterThanOrEqual(7);
+    expect(denials.length).toBeGreaterThanOrEqual(9);
     expect(JSON.stringify(denials)).not.toContain("9876543210");
   });
 });
@@ -165,25 +156,23 @@ describe("report and block", () => {
     expect((await db().select().from(auditLog).where(eq(auditLog.action, "report.created"))).length).toBeGreaterThan(0);
   });
 
-  it("a block cancels pending requests, stops new ones, and ends reveal, from either side", async () => {
+  it("a block stops new connections and ends reveal, from either side, and cancels legacy pending requests", async () => {
     const p = await approvedPair();
-    // a second, still-pending request between a different pair
+    // a request from the old approval flow that is still pending between a different pair
     const s2 = await makeSeeker();
     const g2 = await makeGuide();
-    const [run] = await db().insert(matchRuns).values({ seekerId: s2.user.id, inputHash: randomUUID(), status: "done" }).returning();
-    const [m2] = await db().insert(matches).values({ runId: run!.id, seekerId: s2.user.id, guideId: g2.user.id, rank: 1, score: 0.5, status: "final" }).returning();
-    const pending = await createRequest({ seekerId: s2.user.id, matchId: m2!.id });
-    if (!pending.ok) throw new Error("x");
+    const m2 = await makeMatch(s2.user.id, g2.user.id);
+    const [legacy] = await db().insert(connectionRequests).values({ seekerId: s2.user.id, guideId: g2.user.id, matchId: m2.id, status: "pending", tokenHash: randomUUID(), expiresAt: new Date(Date.now() + 1e9) }).returning();
 
     // the Guide blocks the first Seeker: reveal stops
     expect(await applySafetyAction({ actorId: p.guide.user.id, otherId: p.seeker.user.id, input: { action: "block" } })).toEqual({ ok: true });
     expect(await revealNumber({ seekerId: p.seeker.user.id, connectionId: p.requestId })).toEqual({ ok: false, code: "unavailable" });
 
-    // the second Seeker blocks their pending Guide: the request is cancelled
+    // the second Seeker blocks their Guide: the old pending request is cancelled
     expect(await applySafetyAction({ actorId: s2.user.id, otherId: g2.user.id, input: { action: "block" } })).toEqual({ ok: true });
-    const [req] = await db().select().from(connectionRequests).where(eq(connectionRequests.id, pending.requestId));
+    const [req] = await db().select().from(connectionRequests).where(eq(connectionRequests.id, legacy!.id));
     expect(req!.status).toBe("cancelled");
-    expect(await createRequest({ seekerId: s2.user.id, matchId: m2!.id })).toMatchObject({ ok: false, code: "unavailable" });
+    expect(await createRequest({ seekerId: s2.user.id, matchId: m2.id })).toMatchObject({ ok: false, code: "unavailable" });
     expect((await findCandidates((await loadSeekerContext(s2.user.id, true))!)).map((c) => c.guideId)).not.toContain(g2.user.id);
 
     // idempotent, and you cannot target yourself
