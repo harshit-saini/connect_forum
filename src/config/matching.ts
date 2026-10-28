@@ -2,6 +2,8 @@
 export const MATCHING = {
   /** Structured score components. They are re-normalised, so only their ratios matter. */
   structured: {
+    /** Guide covers the Seeker's category. Always 1 unless MATCH_FALLBACK_ANY_CATEGORY lets other Guides in. */
+    category: 2,
     /** Years of experience, saturating at `experienceFullYears`. */
     experience: 0.6,
     /** A Guide who covers fewer categories counts as more focused. */

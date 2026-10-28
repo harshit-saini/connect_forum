@@ -125,6 +125,7 @@ Validated with zod at server start (`src/server/env.ts`); a bad config fails fas
 | `MOCK_AI` | no (false) | `true` mocks the LLM, embeddings and e-mail. **Refused on a Vercel production deploy.** |
 | `RATING_DELAY_DAYS` | no (3) | Days after connecting before the rating reminder. |
 | `MIN_GUIDE_EXPERIENCE_YEARS` | no (3) | Guides below this register but are not matched. |
+| `MATCH_FALLBACK_ANY_CATEGORY` | no (false) | Demo safety net: a Seeker with no Guide in their category is still matched to the closest available Guides (their own category always ranks first). Leave off for the real pilot. |
 | `MATCH_COOLDOWN_MINUTES` | no (60) | Minimum gap between a Seeker's searches. |
 | `MATCH_MAX_RUNS_PER_DAY` | no (3) | Searches per Seeker per rolling 24 h. |
 | `MATCH_MAX_CONCURRENCY` | no (5) | Global cap on simultaneously running match jobs. |
@@ -265,3 +266,18 @@ Things worth knowing, where the build had to choose or differ from the brief's l
 - **Ratings** are allowed once a Seeker has connected (not gated on the reminder), editable for 7 days.
 - **No approval step**: the product owner removed the Guide review page. Connecting is approving: the Seeker is e-mailed the Guide's details at once. Legacy columns on `connection_requests` that only the old review used (token hash, expiry, decision fields) stay in the table, unused and nullable; nothing was dropped. A pair that ever connected (or has an old pending request) is excluded from matching.
 - **Not built** (see `SUGGESTIONS.md`): unblock, reporter notifications, push notifications (out of scope for v1).
+
+---
+
+## Demo setup
+
+To make sure a demo Seeker always gets Guides, and can search repeatedly:
+
+```
+MATCH_FALLBACK_ANY_CATEGORY=true   # no Guide in the Seeker's category? show the closest ones
+MATCH_COOLDOWN_MINUTES=0           # allow back-to-back searches
+MATCH_MAX_RUNS_PER_DAY=100
+MIN_GUIDE_EXPERIENCE_YEARS=0       # let any registered Guide be matched
+```
+
+Then register at least one Guide (or run `pnpm seed`, which creates 12 across all four categories). A Seeker is never offered a Guide they already connected with, so use a fresh Seeker for each run-through.

@@ -115,9 +115,9 @@ type Scored = {
 /** One-sentence explanation from the Guide's public fields only, used when the LLM is unavailable. */
 export function genericExplanation(parts: StructuredParts, g: PublicGuide, seekerCategory: string): string {
   const bits: string[] = [];
-  if (g.categories.includes(seekerCategory)) bits.push(`helps people with ${seekerCategory.toLowerCase()}`);
+  if (parts.category >= 1) bits.push(`helps people with ${seekerCategory.toLowerCase()}`);
+  else bits.push("is the closest available match for your question");
   if (parts.experience >= 0.5) bits.push(`has ${g.years} years of experience as ${g.title}`);
-  if (bits.length === 0) bits.push(`brings ${g.years} years of experience as ${g.title}`);
   const sentence = `This Guide ${bits.slice(0, 3).join(", ")}.`;
   return sentence.replace(/, ([^,]*)\.$/, ", and $1.").replace(/^(.{1,200}).*$/, "$1");
 }

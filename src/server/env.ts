@@ -70,6 +70,11 @@ const schema = z
     MOCK_AI: bool(false),
     RATING_DELAY_DAYS: int(3),
     MIN_GUIDE_EXPERIENCE_YEARS: int(3),
+    /**
+     * Demo safety net: when on, a Seeker with no Guide in their category is still matched, to the closest
+     * available Guides (their own category always ranks first). Off for the real pilot.
+     */
+    MATCH_FALLBACK_ANY_CATEGORY: bool(false),
     MATCH_COOLDOWN_MINUTES: int(60),
     MATCH_MAX_RUNS_PER_DAY: int(3, 1),
     MATCH_MAX_CONCURRENCY: int(5, 1),
