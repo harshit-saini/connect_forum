@@ -62,3 +62,25 @@ for (const role of ["seeker", "guide"] as const) {
     await expect(fresh.getByRole("heading", { name: role === "seeker" ? "Ask for guidance" : "Register as a Guide" })).toBeVisible();
   });
 }
+
+test("a member can sign out from the join page and from the public pages, and is really signed out", async ({ page }) => {
+  const email = `signout-${Date.now()}@example.com`;
+  await signIn(page, email, "/join/seeker");
+  await expect(page.getByRole("heading", { name: "Ask for guidance" })).toBeVisible();
+
+  // The join page has no app navigation, so it must offer sign-out itself.
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("link", { name: "Sign in" })).toBeVisible();
+  await page.goto("/join/seeker");
+  await expect(page).toHaveURL(/\/sign-in/); // the session is gone, not just hidden
+
+  // Signed in again, the public landing page shows Sign out as well as Dashboard.
+  await signIn(page, email, "/join/seeker");
+  await page.goto("/");
+  await expect(page.getByRole("link", { name: "Dashboard" })).toBeVisible();
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page.getByRole("link", { name: "Sign in" })).toBeVisible();
+  await page.goto("/settings");
+  await expect(page).toHaveURL(/\/sign-in/);
+});
