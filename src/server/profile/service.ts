@@ -9,7 +9,7 @@ import { isKnownMemberId } from "@/server/members";
 import { deriveGuide, deriveSeeker, isMatchingChange } from "./derive";
 import { bumpCounter, GUIDE_POOL_VERSION } from "./counters";
 import { onProfileChanged } from "./hooks";
-import { isAcceptablePhone, phoneStatus, savePhone } from "./phone";
+import { deletePhone, isAcceptablePhone, phoneStatus, savePhone } from "./phone";
 
 export type FieldErrors = Record<string, string>;
 export type SaveResult = { ok: true; created: boolean } | { ok: false; fieldErrors: FieldErrors; formError?: string };
@@ -55,9 +55,10 @@ class Abort extends Error {
  *
  *  - The member ID must be on the allow-list for the role (hard check) and can't be changed afterwards.
  *  - One completed role per account; the role comes from the link they used. An unfinished profile of the other role is dropped.
- *  - Guides must supply a phone number once; it goes to the encrypted vault, never into `data`.
+ *  - A Guide's phone number is optional. When given it goes to the encrypted vault (never into `data`) and is
+ *    e-mailed to Seekers who connect. `removePhone` deletes the saved one; a number given in the same save wins.
  */
-export async function saveProfile(args: { userId: string; role: Role; values: unknown; phone?: string }): Promise<SaveResult> {
+export async function saveProfile(args: { userId: string; role: Role; values: unknown; phone?: string; removePhone?: boolean }): Promise<SaveResult> {
   const { userId, role } = args;
   const raw = (args.values ?? {}) as Record<string, unknown>;
   const state = await loadProfileState(userId, role);
@@ -70,13 +71,7 @@ export async function saveProfile(args: { userId: string; role: Role; values: un
   if (parsed.success && !state.memberId && !isKnownMemberId(role, parsed.data.memberId)) {
     fieldErrors.memberId = "We couldn't find that member ID. Check it and try again.";
   }
-  if (role === "guide") {
-    if (args.phone) {
-      if (!isAcceptablePhone(args.phone)) fieldErrors.phone = "Enter a valid number with country code";
-    } else if (!state.phone.has) {
-      fieldErrors.phone = "Your phone number is required";
-    }
-  }
+  if (role === "guide" && args.phone && !isAcceptablePhone(args.phone)) fieldErrors.phone = "Enter a valid number with country code";
   if (!parsed.success || Object.keys(fieldErrors).length) return { ok: false, fieldErrors };
 
   const { memberId, agree: _agree, ...answers } = parsed.data as { memberId: string; agree: true } & Record<string, unknown>;
@@ -104,7 +99,10 @@ export async function saveProfile(args: { userId: string; role: Role; values: un
         await tx.insert(userRoles).values({ userId, role });
       }
 
-      if (args.phone) await savePhone(tx, userId, args.phone);
+      if (role === "guide") {
+        if (args.phone) await savePhone(tx, userId, args.phone);
+        else if (args.removePhone) await deletePhone(tx, userId);
+      }
 
       const t = table(role);
       const [row] = await tx.select({ version: t.profileVersion }).from(t).where(eq(t.userId, userId));

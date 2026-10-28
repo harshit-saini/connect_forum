@@ -13,6 +13,8 @@ export type OutgoingEmail = {
   react: ReactElement;
   /** Free-form label stored with the Resend event for correlation, e.g. "signin-otp". */
   kind: string;
+  /** Stops Resend sending the same message twice when a job is retried after a lost response. */
+  idempotencyKey?: string;
 };
 
 let resend: Resend | undefined;
@@ -39,7 +41,7 @@ export async function sendEmail(mail: OutgoingEmail): Promise<void> {
     html,
     text,
     tags: [{ name: "kind", value: mail.kind }],
-  });
+  }, mail.idempotencyKey ? { idempotencyKey: mail.idempotencyKey } : undefined);
   if (error) {
     log.error("email.send_failed", { kind: mail.kind, error: error.message });
     throw new Error(`Email send failed: ${error.name}`);

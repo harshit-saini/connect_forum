@@ -3,62 +3,49 @@ import { EmailLayout } from "./layout";
 
 const button = { backgroundColor: "#0f766e", borderRadius: 8, color: "#fff", padding: "12px 20px" } as const;
 
-/** To a Guide. Public career details only: never any contact information. */
-export function ConnectionRequestEmail({ seekerName, category, question, link, days }: { seekerName: string; category: string; question: string; link: string; days: number }) {
+/**
+ * To a Seeker who connected with a Guide. The Guide's public profile, plus their phone number only when
+ * the Guide chose to provide one (`phone` is null otherwise).
+ */
+export function GuideDetailsEmail({ title, years, categories, about, phone, link }: { title: string; years: number; categories: string[]; about: string; phone: string | null; link: string }) {
   return (
-    <EmailLayout preview={`${seekerName} would like your guidance`}>
+    <EmailLayout preview={`Your Guide's details: ${title}`}>
       <Heading as="h1" style={{ fontSize: 22, margin: "0 0 12px" }}>
-        A Seeker would like your guidance
+        Your Guide&apos;s details
       </Heading>
-      <Text>
-        <strong>{seekerName}</strong> asked to connect with you.
+      <Text>You asked to connect with a Guide, and here are their details.</Text>
+      <Text style={{ margin: "4px 0" }}>
+        <strong>{title}</strong>
       </Text>
-      <Text style={{ margin: "4px 0" }}>Category: {category}</Text>
-      <Text style={{ margin: "4px 0" }}>Their question: {question}</Text>
-      <Text>You can review the request, then approve or decline. Your phone number is shared with this Seeker only if you approve. No login needed. The link works once and expires in {days} days.</Text>
-      <Button href={link} style={button}>Review the request</Button>
-      <Text style={{ color: "#6b7280", fontSize: 13 }}>Link: {link}</Text>
-    </EmailLayout>
-  );
-}
-
-/** To a Seeker. Deliberately does not contain the Guide's number. */
-export function RequestApprovedEmail({ guideName, link }: { guideName: string; link: string }) {
-  return (
-    <EmailLayout preview={`${guideName} approved your request`}>
-      <Heading as="h1" style={{ fontSize: 22, margin: "0 0 12px" }}>
-        Your request was approved
-      </Heading>
-      <Text>
-        <strong>{guideName}</strong> approved your request. Sign in to see how to reach them. For your privacy, contact details are never sent by email.
-      </Text>
+      <Text style={{ margin: "4px 0" }}>Experience: {years} years</Text>
+      {categories.length > 0 && <Text style={{ margin: "4px 0" }}>Can help with: {categories.join(", ")}</Text>}
+      <Text style={{ margin: "4px 0" }}>How I can help: {about}</Text>
+      {phone ? (
+        <>
+          <Text style={{ margin: "16px 0 4px" }}>Phone number, shared by the Guide so Seekers can reach them:</Text>
+          <Text style={{ fontSize: 20, fontWeight: 600, margin: "0 0 12px" }}>{phone}</Text>
+          <Text>Please be respectful of their time, and keep the number to yourself.</Text>
+        </>
+      ) : (
+        <Text style={{ margin: "16px 0 12px" }}>This Guide didn&apos;t share a phone number, so you can&apos;t contact them directly.</Text>
+      )}
       <Button href={link} style={button}>Open in Connect</Button>
     </EmailLayout>
   );
 }
 
-/** To a Seeker. Generic on purpose: no Guide is named. */
-export function RequestDeclinedEmail({ link }: { link: string }) {
+/** To a Guide. Tells them a Seeker was given their details: Seekers have no contact details to share. */
+export function GuideNotifiedEmail({ category, question, note, hasPhone }: { category: string; question: string; note: string | null; hasPhone: boolean }) {
   return (
-    <EmailLayout preview="An update on your request">
+    <EmailLayout preview="A Seeker has been given your details">
       <Heading as="h1" style={{ fontSize: 22, margin: "0 0 12px" }}>
-        An update on your request
+        A Seeker connected with you
       </Heading>
-      <Text>A Guide isn&apos;t able to take your request right now. That&apos;s no reflection on you, as Guides have limited time.</Text>
-      <Text>Your other matches are still waiting, and you can send a request to another Guide.</Text>
-      <Button href={link} style={button}>See other matches</Button>
-    </EmailLayout>
-  );
-}
-
-export function RequestExpiredEmail({ link }: { link: string }) {
-  return (
-    <EmailLayout preview="Your request wasn't answered in time">
-      <Heading as="h1" style={{ fontSize: 22, margin: "0 0 12px" }}>
-        Your request wasn&apos;t answered in time
-      </Heading>
-      <Text>A Guide didn&apos;t respond within 7 days, so the request has closed. You can send a request to another Guide.</Text>
-      <Button href={link} style={button}>See other matches</Button>
+      <Text>A Seeker asked for guidance and has been sent your profile details{hasPhone ? ", including your phone number" : ""}.</Text>
+      <Text style={{ margin: "4px 0" }}>Category: {category}</Text>
+      <Text style={{ margin: "4px 0" }}>Their question: {question}</Text>
+      {note && <Text style={{ margin: "4px 0" }}>Their note: {note}</Text>}
+      <Text>{hasPhone ? "They may call or text you. You can remove your number any time by editing your profile." : "You didn't provide a phone number, so they can't contact you directly. You can add one any time by editing your profile."}</Text>
     </EmailLayout>
   );
 }

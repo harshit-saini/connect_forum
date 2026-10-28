@@ -33,7 +33,7 @@ test("a seeker registers on one page: the member ID is checked, contact details 
   await page.getByLabel("Member ID").fill(E2E_IDS.seeker[0]!.toLowerCase());
   await page.getByLabel("Your question").fill(question + " Email me at me@example.com");
   await page.getByRole("button", { name: "Join", exact: true }).click();
-  await expect(page.getByText("Please remove contact details. Contact details are only shared after approval.")).toBeVisible();
+  await expect(page.getByText("Please remove contact details. Contact details can't be shared in free text.")).toBeVisible();
 
   await page.getByLabel("Your question").fill(question);
   await page.getByRole("button", { name: "Join", exact: true }).click();

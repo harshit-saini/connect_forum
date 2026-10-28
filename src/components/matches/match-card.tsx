@@ -13,17 +13,17 @@ function Chips({ items, label }: { items: string[]; label: string }) {
   );
 }
 
-const CONNECTION_LABEL: Record<Match["connection"], string | null> = {
-  none: null,
-  pending: "Request sent",
-  approved: "Approved",
-  declined: "Declined",
-  expired: "Request expired",
-};
+/** Any earlier connection with this Guide means the pair is taken; only an approved one has had details sent. */
+const CONNECTION_LABEL: Partial<Record<string, string>> = { approved: "Details sent" };
+
+function connectionLabel(connection: string): string | null {
+  if (connection === "none") return null;
+  return CONNECTION_LABEL[connection] ?? "Not available";
+}
 
 export function MatchCardView({ match, action, ai = false }: { match: Match; action?: React.ReactNode; ai?: boolean }) {
   const { guide } = match;
-  const status = CONNECTION_LABEL[match.connection];
+  const status = connectionLabel(match.connection);
   return (
     <Card className="space-y-3">
       <div className="flex items-start justify-between gap-3">

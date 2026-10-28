@@ -188,3 +188,16 @@ describe("match ids stay stable when preliminary results become final", () => {
     expect(kept.every((m) => idsBefore.get(m.guideId) === m.id)).toBe(true);
   });
 });
+
+describe("match cards after the approval flow was removed", () => {
+  it("offers 'connect' again for a Guide whose old request was declined, expired or cancelled", async () => {
+    const { getRunView } = await import("@/server/matching/view");
+    const { user: seeker } = await makeSeeker();
+    const g = (await makeGuide()).user;
+    const [run] = await db().insert(matchRuns).values({ seekerId: seeker.id, inputHash: randomUUID(), status: "done" }).returning();
+    await db().insert(matches).values({ runId: run!.id, seekerId: seeker.id, guideId: g.id, rank: 1, score: 0.9, explanation: "A fit", status: "final" });
+    await db().insert(connectionRequests).values({ seekerId: seeker.id, guideId: g.id, status: "cancelled", tokenHash: randomUUID(), expiresAt: new Date() });
+    const view = (await getRunView(run!.id, seeker.id))!;
+    expect(view.matches[0]!.connection).toBe("none");
+  });
+});

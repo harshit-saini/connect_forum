@@ -2,7 +2,7 @@
  * Free-text screening shared by client and server. Errors block saving; warnings are advisory.
  * Pure functions, no I/O, so the same rules run in the browser and in server validation.
  */
-export const CONTACT_ERROR = "Please remove contact details. Contact details are only shared after approval.";
+export const CONTACT_ERROR = "Please remove contact details. Contact details can't be shared in free text.";
 
 export type ScreenResult = { errors: string[]; warnings: string[] };
 

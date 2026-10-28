@@ -56,8 +56,8 @@ describe("service worker routing", () => {
     expect(classify("GET", "/offline.html", "same-origin")).toBe("static");
   });
 
-  it("never treats API, auth, review or phone-number pages as cacheable", () => {
-    for (const path of ["/api/connections/abc/reveal", "/api/matches/start", "/api/auth/get-session", "/sign-in", "/review/abc", "/seeker/connections/abc", "/seeker/rate/abc", "/onboarding", "/profile", "/settings", "/admin/users", "/seeker", "/guide", "/"]) {
+  it("never treats API, auth or phone-number pages as cacheable", () => {
+    for (const path of ["/api/connections/abc/reveal", "/api/matches/start", "/api/auth/get-session", "/sign-in", "/seeker/connections/abc", "/seeker/rate/abc", "/onboarding", "/profile", "/settings", "/admin/users", "/seeker", "/guide", "/"]) {
       for (const mode of ["cors", "same-origin", "no-cors", "navigate"]) expect(classify("GET", path, mode), `${path} ${mode}`).not.toBe("static");
       expect(classify("GET", path, "cors"), `${path} data fetch`).toBe("pass");
     }

@@ -133,6 +133,11 @@ export const phoneVault = pgTable("phone_vault", {
   keyVersion: integer("key_version").notNull().default(1),
   /** Last 4 digits, so the form can confirm a number is on file without returning it. */
   last4: text("last4").notNull(),
+  /**
+   * When the Guide saved this number knowing it is emailed to Seekers who connect. Numbers saved before that
+   * (null) were given under "shown only to Seekers you approve" and are never sent or shown.
+   */
+  emailConsentAt: timestamp("email_consent_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

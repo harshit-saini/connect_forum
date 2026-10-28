@@ -60,8 +60,8 @@ export const embedProfile: Handler = async (job) => {
 export const handlers: Record<JobType, Handler> = {
   embed_profile: embedProfile,
   match_run: async (job) => executeRun(String(job.payload.runId)),
-  send_email: async (job) => sendEmailJob(job.payload as Parameters<typeof sendEmailJob>[0], job.id),
-  rating_reminder: async (job) => sendEmailJob({ ...(job.payload as { userId: string }), kind: "rating_reminder" }, job.id),
+  send_email: async (job) => sendEmailJob(job.payload as Parameters<typeof sendEmailJob>[0]),
+  rating_reminder: async (job) => sendEmailJob({ ...(job.payload as { userId: string }), kind: "rating_reminder" }),
 };
 
 /** Called once a job has used all its attempts, so user-visible state does not stay "in progress". */

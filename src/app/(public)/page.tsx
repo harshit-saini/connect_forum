@@ -7,8 +7,8 @@ import { env } from "@/server/env";
 const baseSteps = [
   ["Tell us your question", "A one-page form with your member ID. Others never see your name, only your category and experience."],
   null, // replaced by the matching step (see matchingCopy)
-  ["Guide approves", "A Guide sees your anonymous request and decides. No approval, no contact."],
-  ["Talk directly", "After approval you see the Guide's number in the portal and contact them yourself. Then rate the experience."],
+  ["Connect", "Press “I want to connect” on a match. There is no approval step: we email you the Guide's profile details straight away, and their phone number if they chose to share one. The Guide is told someone connected."],
+  ["Talk directly", "If the Guide shared a number, contact them yourself, outside the portal. Then rate the experience."],
 ];
 
 export default async function Landing({ searchParams }: { searchParams: Promise<{ deleted?: string }> }) {
@@ -22,8 +22,8 @@ export default async function Landing({ searchParams }: { searchParams: Promise<
       <section className="max-w-2xl space-y-5">
         <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">Career guidance from people who have been there.</h1>
         <p className="text-lg text-muted">
-          Connect matches job seekers with experienced professionals. Everyone stays anonymous until a Guide approves
-          a connection.
+          Connect matches job seekers with experienced professionals. Seekers stay anonymous: Guides never see your
+          name or contact details. A Guide chooses whether to share a phone number.
         </p>
         <div className="flex flex-wrap gap-3">
           <Link href="/join/seeker" className={buttonVariants({ className: "px-6" })}>
@@ -56,8 +56,8 @@ export default async function Landing({ searchParams }: { searchParams: Promise<
       <section aria-labelledby="privacy" className="rounded-2xl bg-accent p-6 sm:p-8">
         <h2 id="privacy" className="text-2xl font-semibold">Our privacy promise</h2>
         <ul className="mt-3 list-disc space-y-1.5 pl-5">
-          <li>Names, emails and phone numbers are never shown to the other side. No real names, photos, age, gender or religion are collected.</li>
-          <li>A Guide&apos;s phone number is encrypted and shown only to a Seeker that Guide approved.</li>
+          <li>A Seeker&apos;s name, email and phone number are never shown to a Guide. No real names, photos, age, gender or religion are collected.</li>
+          <li>A Guide&apos;s phone number is optional. If a Guide adds one, it is stored encrypted and emailed to Seekers who connect with them. A Guide can remove it at any time.</li>
           <li>We never relay messages. Conversations happen outside the portal, on your terms.</li>
           <li>You can export or delete your data at any time.</li>
         </ul>

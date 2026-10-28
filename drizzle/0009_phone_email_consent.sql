@@ -1,0 +1,1 @@
+ALTER TABLE "phone_vault" ADD COLUMN "email_consent_at" timestamp with time zone;

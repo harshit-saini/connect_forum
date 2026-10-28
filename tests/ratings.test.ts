@@ -1,15 +1,14 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/server/db/client";
 import { connectionRequests, counters, devOutbox, jobs, matchRuns, matches, ratings, users } from "@/server/db/schema";
-import { createRequest, decide } from "@/server/connections/service";
 import { runHousekeeping } from "@/server/housekeeping";
 import { processJobs } from "@/server/jobs/worker";
 import { queue } from "@/server/jobs";
 import { executeRun, startRun } from "@/server/matching/pipeline";
 import { getOwnRating, guideRatingSummary, submitRating } from "@/server/ratings/service";
-import { createUser, makeGuide, makeSeeker } from "./fixtures";
+import { connectedPair, createUser, makeGuide, makeSeeker } from "./fixtures";
 
 beforeAll(async () => {
   await db().delete(users);
@@ -17,24 +16,15 @@ beforeAll(async () => {
 });
 
 async function approvedPair() {
-  const seeker = await makeSeeker();
-  const guide = await makeGuide();
-  const [run] = await db().insert(matchRuns).values({ seekerId: seeker.user.id, inputHash: randomUUID(), status: "done" }).returning();
-  const [m] = await db().insert(matches).values({ runId: run!.id, seekerId: seeker.user.id, guideId: guide.user.id, rank: 1, score: 0.9, status: "final" }).returning();
-  const r = await createRequest({ seekerId: seeker.user.id, matchId: m!.id });
-  if (!r.ok) throw new Error("request failed");
-  await processJobs({ maxMs: 20_000 });
-  const mail = (await db().select().from(devOutbox).where(eq(devOutbox.to, guide.user.email)).orderBy(desc(devOutbox.createdAt)))[0]!;
-  const token = /\/review\/([A-Za-z0-9_-]{43})/.exec(mail.text)![1]!;
-  await decide(token, "approve");
-  return { seeker, guide, requestId: r.requestId };
+  const p = await connectedPair();
+  return { seeker: p.seeker, guide: p.guide, requestId: p.requestId };
 }
 
 /** Inserts `n` ratings of `score` for a guide, each from its own approved connection. */
 async function seedRatings(guideId: string, n: number, score: number) {
   for (let i = 0; i < n; i++) {
     const s = await createUser("seeker");
-    const [c] = await db().insert(connectionRequests).values({ seekerId: s.id, guideId, status: "approved", approvedAt: new Date(Date.now() - 40 * 86_400_000), tokenHash: randomUUID(), expiresAt: new Date() }).returning();
+    const [c] = await db().insert(connectionRequests).values({ seekerId: s.id, guideId, status: "approved", approvedAt: new Date(Date.now() - 40 * 86_400_000) }).returning();
     await db().insert(ratings).values({ connectionRequestId: c!.id, seekerId: s.id, guideId, score });
   }
 }
@@ -49,14 +39,11 @@ describe("submitRating", () => {
     expect(await send({ review: "great, call me on 98765 43210" })).toMatchObject({ ok: false, code: "invalid", message: expect.stringContaining("remove contact details") });
     expect(await submitRating({ seekerId: (await makeSeeker()).user.id, connectionId: p.requestId, score: 5 })).toMatchObject({ ok: false, code: "not_found" });
 
-    // not yet approved
+    // a row from the old approval flow that was never approved
     const seeker = await makeSeeker();
     const guide = await makeGuide();
-    const [run] = await db().insert(matchRuns).values({ seekerId: seeker.user.id, inputHash: randomUUID(), status: "done" }).returning();
-    const [m] = await db().insert(matches).values({ runId: run!.id, seekerId: seeker.user.id, guideId: guide.user.id, rank: 1, score: 0.5, status: "final" }).returning();
-    const pending = await createRequest({ seekerId: seeker.user.id, matchId: m!.id });
-    if (!pending.ok) throw new Error("x");
-    expect(await submitRating({ seekerId: seeker.user.id, connectionId: pending.requestId, score: 5 })).toMatchObject({ ok: false, code: "not_approved" });
+    const [legacy] = await db().insert(connectionRequests).values({ seekerId: seeker.user.id, guideId: guide.user.id, status: "pending", tokenHash: randomUUID(), expiresAt: new Date(Date.now() + 1e9) }).returning();
+    expect(await submitRating({ seekerId: seeker.user.id, connectionId: legacy!.id, score: 5 })).toMatchObject({ ok: false, code: "not_approved" });
   });
 
   it("allows one rating per connection, editable for 7 days, and invalidates cached matches", async () => {
@@ -158,12 +145,12 @@ describe("ratings feed matching", () => {
 });
 
 describe("housekeeping", () => {
-  it("requeues stalled jobs, fails dead runs, expires requests, delivers due reminders, and is idempotent", async () => {
+  it("requeues stalled jobs, fails dead runs, closes legacy pending requests, delivers due reminders, and is idempotent", async () => {
     const p = await approvedPair();
     const [rem] = await db().select().from(jobs).where(eq(jobs.idempotencyKey, `rating_reminder:${p.requestId}`));
     await db().update(jobs).set({ runAt: new Date(Date.now() - 1000) }).where(eq(jobs.id, rem!.id));
 
-    // an overdue request
+    // a request left pending by the old approval flow
     await approvedPair();
     const g3 = await makeGuide();
     const s3 = await makeSeeker();
@@ -180,12 +167,12 @@ describe("housekeeping", () => {
     const first = await runHousekeeping();
     expect(first.requeued).toBeGreaterThanOrEqual(1);
     expect(first.failedRuns).toBeGreaterThanOrEqual(1);
-    expect(first.expiredRequests).toBeGreaterThanOrEqual(1);
+    expect(first.closedLegacyRequests).toBeGreaterThanOrEqual(1);
     expect((await db().select().from(matchRuns).where(eq(matchRuns.id, run!.id)))[0]!.status).toBe("failed");
     expect((await db().select().from(devOutbox).where(eq(devOutbox.to, p.seeker.user.email))).some((m) => m.subject === "How was your Guide?")).toBe(true);
 
     const second = await runHousekeeping();
-    expect(second.expiredRequests).toBe(0);
+    expect(second.closedLegacyRequests).toBe(0);
     expect(second.requeued).toBe(0);
   });
 

@@ -11,7 +11,7 @@ export function EmailLayout({ preview, children }: { preview: string; children: 
           {children}
           <Section style={{ marginTop: 32 }}>
             <Text style={{ color: "#6b7280", fontSize: 12, margin: 0 }}>
-              Connect shares contact details only after a Guide approves a connection. We will never ask for your
+              A Guide&apos;s phone number is shared only if the Guide chose to provide one. We will never ask for your
               password or payment details by email.
             </Text>
           </Section>

@@ -40,7 +40,7 @@ export function RevealNumber({ connectionId }: { connectionId: string }) {
     return (
       <Card className="space-y-3">
         <h2 className="text-xl font-semibold">Contact this Guide</h2>
-        <p className="text-sm text-muted">This Guide approved your request. Their number is shown only to you, and contact happens outside Connect.</p>
+        <p className="text-sm text-muted">If you can&apos;t find the email with this Guide&apos;s details, show their number here. It is for you only, and contact happens outside Connect.</p>
         {error && <Alert tone="error">{error}</Alert>}
         <Button onClick={show} disabled={busy}>{busy ? "Loading…" : "Show number"}</Button>
       </Card>

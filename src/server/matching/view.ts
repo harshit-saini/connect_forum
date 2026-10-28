@@ -56,8 +56,9 @@ export async function getRunView(runId: string, seekerId: string): Promise<RunVi
     ? await db().select().from(connectionRequests).where(and(eq(connectionRequests.seekerId, seekerId), inArray(connectionRequests.guideId, guideIds))).orderBy(desc(connectionRequests.createdAt))
     : [];
   const connFor = (guideId: string): MatchCard["connection"] => {
-    const latest = conns.find((c) => c.guideId === guideId);
-    return (latest?.status as MatchCard["connection"] | undefined) ?? "none";
+    // Only a live connection matters; an old declined/expired/cancelled row leaves the Guide connectable.
+    const live = conns.find((c) => c.guideId === guideId && (c.status === "approved" || c.status === "pending"));
+    return (live?.status as MatchCard["connection"] | undefined) ?? "none";
   };
 
   // A run that is waiting should never depend on cron: nudge the worker when its job looks idle.

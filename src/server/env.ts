@@ -69,7 +69,6 @@ const schema = z
     ENABLE_EMBEDDINGS: bool(true),
     MOCK_AI: bool(false),
     RATING_DELAY_DAYS: int(3),
-    MAX_PENDING_REQUESTS: int(3, 1),
     MIN_GUIDE_EXPERIENCE_YEARS: int(3),
     MATCH_COOLDOWN_MINUTES: int(60),
     MATCH_MAX_RUNS_PER_DAY: int(3, 1),

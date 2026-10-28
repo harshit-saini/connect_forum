@@ -7,7 +7,7 @@ export function MatchesReadyEmail({ matches, link }: { matches: Array<{ name: st
       <Heading as="h1" style={{ fontSize: 22, margin: "0 0 12px" }}>
         Your top matches
       </Heading>
-      <Text>We found Guides who could help. Everyone stays anonymous until a Guide approves a connection.</Text>
+      <Text>We found Guides who could help. Seekers stay anonymous: Guides only see your category and question.</Text>
       {matches.map((m, i) => (
         <Text key={i} style={{ margin: "8px 0" }}>
           <strong>{m.name}</strong>

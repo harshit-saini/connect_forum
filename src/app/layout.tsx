@@ -12,7 +12,7 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 
 export const metadata: Metadata = {
   title: { default: "Connect", template: "%s · Connect" },
-  description: "Anonymous career guidance. Get matched with an experienced Guide, and share contact details only after they approve.",
+  description: "Anonymous career guidance. Get matched with an experienced Guide, and connect with them directly.",
   applicationName: "Connect",
   appleWebApp: { capable: true, title: "Connect", statusBarStyle: "default" },
   icons: { apple: "/icons/apple-touch-icon.png" },

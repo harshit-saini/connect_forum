@@ -34,7 +34,7 @@ export default async function RatePage({ params }: { params: Promise<{ id: strin
         <p className="mt-1 text-muted">Your rating and review are private. The Guide only ever sees an average, and only once they have at least 3 ratings.</p>
       </div>
       {row.status !== "approved" ? (
-        <Card><p className="text-sm text-muted">You can rate a Guide once they have approved your request.</p></Card>
+        <Card><p className="text-sm text-muted">You can rate a Guide once you have connected with them.</p></Card>
       ) : (
         <Card className="space-y-3">
           {own && <p className="text-sm text-muted">{locked ? "This rating can no longer be changed." : `You can change this until ${own.editableUntil.toLocaleDateString("en-GB", { day: "numeric", month: "short" })} (${RATING_EDIT_DAYS} days after you gave it).`}</p>}

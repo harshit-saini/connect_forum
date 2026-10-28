@@ -64,7 +64,7 @@ export async function buildExport(userId: string) {
     generatedAt: new Date().toISOString(),
     account: { email: user.email, createdAt: user.createdAt, role: role?.role ?? null },
     profile: { completed: Boolean((seeker ?? guide)?.profileCompletedAt), answers: stripLegacy((seeker ?? guide)?.data), unsubmittedDraft: draft?.data ?? null },
-    phone: guide ? { onFile: Boolean(vault), endsWith: vault?.last4 ?? null, note: "Your number is stored encrypted and shown only to Seekers you approve." } : undefined,
+    phone: guide ? { onFile: Boolean(vault), endsWith: vault?.last4 ?? null, note: "If you provide a number it is stored encrypted and e-mailed to Seekers who connect with you. You can remove it any time." } : undefined,
     matches: matchRows.map(({ guideData, ...m }) => ({ ...m, guide: guideDisplayName(guideData) })),
     requests: requestRows.map((r) => ({ direction: r.seekerId === userId ? "sent" : "received", with: r.seekerId === userId ? guideDisplayName(r.guideData) : seekerDisplayName(r.seekerData), status: r.status, note: r.seekerId === userId ? r.note : undefined, createdAt: r.createdAt, decidedAt: r.decidedAt })),
     ratingsGiven: givenRows.map(({ guideData, ...g }) => ({ ...g, guide: guideDisplayName(guideData) })),

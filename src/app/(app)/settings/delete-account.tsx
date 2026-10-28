@@ -10,7 +10,7 @@ export function DeleteAccount() {
   const [text, setText] = useState("");
   return (
     <form action={action} className="space-y-3">
-      <p className="text-sm text-muted">This permanently deletes your profile, requests, matches, ratings and (for Guides) your encrypted phone number. It can&apos;t be undone.</p>
+      <p className="text-sm text-muted">This permanently deletes your profile, connections, matches, ratings and (for Guides) your encrypted phone number. It can&apos;t be undone.</p>
       <label htmlFor="confirm" className="block text-sm font-medium">Type <strong>DELETE</strong> to confirm</label>
       <Input id="confirm" name="confirm" autoComplete="off" value={text} onChange={(e) => setText(e.target.value)} />
       {state.error && <Alert tone="error">{state.error}</Alert>}

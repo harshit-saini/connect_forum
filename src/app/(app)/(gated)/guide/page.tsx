@@ -5,6 +5,7 @@ import { PauseToggle } from "@/components/guide/pause-toggle";
 import { Card } from "@/components/ui/card";
 import { db } from "@/server/db/client";
 import { connectionRequests, guideProfiles } from "@/server/db/schema";
+import { phoneStatus } from "@/server/profile/phone";
 import { guideRatingSummary } from "@/server/ratings/service";
 import { startOfMonthUtc } from "@/server/time";
 import { requireCompletedProfile } from "@/server/viewer";
@@ -20,6 +21,7 @@ export default async function GuideDashboard() {
   const monthStart = startOfMonthUtc();
   const [{ n: approved }] = await db().select({ n: count() }).from(connectionRequests).where(and(eq(connectionRequests.guideId, viewer.id), eq(connectionRequests.status, "approved"), gte(connectionRequests.approvedAt, monthStart)));
   const rating = await guideRatingSummary(viewer.id);
+  const phone = await phoneStatus(db(), viewer.id);
 
   return (
     <div className="space-y-8">
@@ -42,7 +44,7 @@ export default async function GuideDashboard() {
         </Card>
         <Card className="space-y-1">
           <h2 className="text-sm font-medium text-muted">This month</h2>
-          <p className="text-3xl font-semibold">{approved} <span className="text-base font-normal text-muted">new Seekers approved</span></p>
+          <p className="text-3xl font-semibold">{approved} <span className="text-base font-normal text-muted">new Seekers connected</span></p>
           <p className="text-sm text-muted">Pause matching below at any time if you need a break.</p>
         </Card>
       </div>
@@ -50,8 +52,14 @@ export default async function GuideDashboard() {
       <Card><PauseToggle paused={profile?.paused ?? false} /></Card>
 
       <Card className="space-y-1 text-sm">
-        <h2 className="font-semibold">How requests reach you</h2>
-        <p className="text-muted">When a Seeker asks to connect, you receive an email with a private link to approve or decline. No login is needed, and your number is shown only to Seekers you approve.</p>
+        <h2 className="font-semibold">What happens when a Seeker connects</h2>
+        <p className="text-muted">There is nothing to approve. When a Seeker presses “I want to connect”, they are emailed your public details: your role, years of experience, categories and how you can help. You get a short email saying someone connected, with their category and question. Seekers never share a name or contact details.</p>
+        <p className="text-muted">
+          {phone.has
+            ? `Your phone number (ending ${phone.last4}) is emailed to every Seeker who connects with you. `
+            : "You haven't added a phone number, so Seekers get only your profile details and can't contact you directly. "}
+          To add, change or remove a number, <Link href="/profile/edit" className="underline">edit your profile</Link>. Removing it takes effect for future connections; emails already sent can&apos;t be recalled.
+        </p>
       </Card>
     </div>
   );

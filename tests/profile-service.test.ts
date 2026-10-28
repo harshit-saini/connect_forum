@@ -29,7 +29,7 @@ describe("seeker registration", () => {
   it("rejects contact details in the question with the standard message", async () => {
     const u = await createUser();
     const r = await saveProfile({ userId: u.id, role: "seeker", values: seekerForm({ query: "I feel stuck in my job, email me at x@y.com about it" }) });
-    expect(r).toMatchObject({ ok: false, fieldErrors: { query: "Please remove contact details. Contact details are only shared after approval." } });
+    expect(r).toMatchObject({ ok: false, fieldErrors: { query: "Please remove contact details. Contact details can't be shared in free text." } });
   });
 
   it("requires the category, a question and the consent", async () => {
@@ -152,12 +152,65 @@ describe("guide registration", () => {
     expect(await poolVersion()).toBeGreaterThan(before);
   });
 
-  it("requires a phone number in a valid format, and at least one category", async () => {
+  it("registers without a phone number: it is optional and nothing is stored in the vault", async () => {
     const u = await createUser();
-    expect(await saveProfile({ userId: u.id, role: "guide", values: guideForm() })).toMatchObject({ ok: false, fieldErrors: { phone: "Your phone number is required" } });
+    expect(await saveProfile({ userId: u.id, role: "guide", values: guideForm() })).toEqual({ ok: true, created: true });
+    expect(await db().select().from(phoneVault).where(eq(phoneVault.guideId, u.id))).toHaveLength(0);
+    expect((await loadProfileState(u.id, "guide")).phone).toEqual({ has: false, last4: null });
+    expect((await db().select().from(guideProfiles).where(eq(guideProfiles.userId, u.id)))[0]!.profileCompletedAt).toBeInstanceOf(Date);
+  });
+
+  it("still format-checks a number that is given, and requires at least one category", async () => {
+    const u = await createUser();
     expect(await saveProfile({ userId: u.id, role: "guide", values: guideForm(), phone: "98765" })).toMatchObject({ ok: false, fieldErrors: { phone: expect.any(String) } });
     expect(await saveProfile({ userId: u.id, role: "guide", values: guideForm({ categories: [] }), phone: PHONE })).toMatchObject({ ok: false, fieldErrors: { categories: expect.any(String) } });
     expect(await db().select().from(guideProfiles).where(eq(guideProfiles.userId, u.id))).toHaveLength(0);
+    expect(await db().select().from(phoneVault).where(eq(phoneVault.guideId, u.id))).toHaveLength(0);
+  });
+
+  it("adds a number later, replaces it, and removing it deletes the vault row", async () => {
+    const u = await createUser();
+    const form = guideForm();
+    await saveProfile({ userId: u.id, role: "guide", values: form });
+    expect(await db().select().from(phoneVault).where(eq(phoneVault.guideId, u.id))).toHaveLength(0);
+
+    // add
+    expect(await saveProfile({ userId: u.id, role: "guide", values: form, phone: PHONE })).toMatchObject({ ok: true, created: false });
+    const [added] = await db().select().from(phoneVault).where(eq(phoneVault.guideId, u.id));
+    expect(openRow(added!, u.id)).toBe(PHONE);
+    expect(added!.encryptedNumber.toString("utf8")).not.toContain("9876543210");
+
+    // an edit without a number keeps the saved one
+    expect(await saveProfile({ userId: u.id, role: "guide", values: form })).toMatchObject({ ok: true });
+    expect(await db().select().from(phoneVault).where(eq(phoneVault.guideId, u.id))).toHaveLength(1);
+
+    // replace
+    expect(await saveProfile({ userId: u.id, role: "guide", values: form, phone: "+14155552671" })).toMatchObject({ ok: true });
+    const [replaced] = await db().select().from(phoneVault).where(eq(phoneVault.guideId, u.id));
+    expect(openRow(replaced!, u.id)).toBe("+14155552671");
+    expect(replaced!.last4).toBe("2671");
+
+    // remove
+    expect(await saveProfile({ userId: u.id, role: "guide", values: form, removePhone: true })).toMatchObject({ ok: true });
+    expect(await db().select().from(phoneVault).where(eq(phoneVault.guideId, u.id))).toHaveLength(0);
+    expect((await loadProfileState(u.id, "guide")).phone.has).toBe(false);
+    // removing again is harmless
+    expect(await saveProfile({ userId: u.id, role: "guide", values: form, removePhone: true })).toMatchObject({ ok: true });
+  });
+
+  it("a number given in the same save wins over removePhone, and a bad number blocks the whole save", async () => {
+    const u = await createUser();
+    const form = guideForm();
+    await saveProfile({ userId: u.id, role: "guide", values: form, phone: PHONE });
+    expect(await saveProfile({ userId: u.id, role: "guide", values: form, phone: "+14155552671", removePhone: true })).toMatchObject({ ok: true });
+    expect(openRow((await db().select().from(phoneVault).where(eq(phoneVault.guideId, u.id)))[0]!, u.id)).toBe("+14155552671");
+    expect(await saveProfile({ userId: u.id, role: "guide", values: form, phone: "12", removePhone: true })).toMatchObject({ ok: false, fieldErrors: { phone: expect.any(String) } });
+    expect(await db().select().from(phoneVault).where(eq(phoneVault.guideId, u.id))).toHaveLength(1); // nothing changed
+  });
+
+  it("removePhone is ignored for Seekers", async () => {
+    const u = await createUser();
+    expect(await saveProfile({ userId: u.id, role: "seeker", values: seekerForm(), removePhone: true })).toMatchObject({ ok: true });
   });
 
   it("only bumps profile_version and the guide pool for matching-relevant edits", async () => {

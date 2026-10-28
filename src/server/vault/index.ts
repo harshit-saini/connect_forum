@@ -45,14 +45,3 @@ type VaultRow = { encryptedNumber: Buffer; iv: Buffer; tag: Buffer; keyVersion: 
 export function openRow(row: VaultRow, aad: string): string {
   return open({ ciphertext: row.encryptedNumber, iv: row.iv, tag: row.tag, keyVersion: row.keyVersion }, aad);
 }
-
-/** Seals a short secret into one string (for places that only hold text, e.g. a job payload). */
-export function sealToString(plaintext: string, aad: string): string {
-  const s = seal(plaintext, aad);
-  return JSON.stringify({ c: s.ciphertext.toString("base64"), i: s.iv.toString("base64"), t: s.tag.toString("base64"), v: s.keyVersion });
-}
-
-export function openFromString(sealed: string, aad: string): string {
-  const p = JSON.parse(sealed) as { c: string; i: string; t: string; v: number };
-  return open({ ciphertext: Buffer.from(p.c, "base64"), iv: Buffer.from(p.i, "base64"), tag: Buffer.from(p.t, "base64"), keyVersion: p.v }, aad);
-}

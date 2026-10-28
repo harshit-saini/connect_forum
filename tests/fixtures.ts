@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/server/db/client";
-import { users, userRoles } from "@/server/db/schema";
+import { matchRuns, matches, users, userRoles } from "@/server/db/schema";
+import { createRequest } from "@/server/connections/service";
+import { processJobs } from "@/server/jobs/worker";
 import { saveProfile } from "@/server/profile/service";
 
 export async function createUser(role?: "seeker" | "guide", email = `u-${randomUUID()}@example.com`) {
@@ -52,10 +54,41 @@ export async function makeSeeker(over: Partial<SeekerForm> = {}) {
   return { user: u, form };
 }
 
-export async function makeGuide(over: Partial<GuideForm> = {}) {
+/** A completed Guide. They have a phone number on file unless `opts.phone` is null (the number is optional). */
+export async function makeGuide(over: Partial<GuideForm> = {}, opts: { phone?: string | null } = {}) {
   const u = await createUser();
   const form = guideForm(over);
-  const r = await saveProfile({ userId: u.id, role: "guide", values: form, phone: PHONE });
+  const phone = opts.phone === null ? undefined : (opts.phone ?? PHONE);
+  const r = await saveProfile({ userId: u.id, role: "guide", values: form, phone });
   if (!r.ok) throw new Error(`guide: ${JSON.stringify(r)}`);
   return { user: u, form };
+}
+
+/** Runs every due job (profile embeddings from earlier fixtures included), not just one batch. */
+export async function drainJobs() {
+  while ((await processJobs({ maxMs: 20_000, maxJobs: 100 })) > 0);
+}
+
+/** A finished match run linking a Seeker to a Guide, as the matching pipeline would leave it. */
+export async function makeMatch(seekerId: string, guideId: string) {
+  const [run] = await db().insert(matchRuns).values({ seekerId, inputHash: randomUUID(), status: "done" }).returning();
+  const [m] = await db().insert(matches).values({ runId: run!.id, seekerId, guideId, rank: 1, score: 0.9, explanation: "A fit", status: "final" }).returning();
+  return m!;
+}
+
+/** A fresh Seeker and Guide plus their match, not yet connected. */
+export async function makePair(opts: { guide?: Partial<GuideForm>; phone?: string | null } = {}) {
+  const seeker = await makeSeeker();
+  const guide = await makeGuide(opts.guide, { phone: opts.phone });
+  const match = await makeMatch(seeker.user.id, guide.user.id);
+  return { seeker, guide, match };
+}
+
+/** A fresh pair where the Seeker has pressed "I want to connect" and the queued e-mails have been sent. */
+export async function connectedPair(opts: { guide?: Partial<GuideForm>; phone?: string | null; note?: string } = {}) {
+  const p = await makePair(opts);
+  const r = await createRequest({ seekerId: p.seeker.user.id, matchId: p.match.id, note: opts.note });
+  if (!r.ok) throw new Error(`connect failed: ${JSON.stringify(r)}`);
+  await drainJobs();
+  return { ...p, requestId: r.requestId, matchId: p.match.id };
 }

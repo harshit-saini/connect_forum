@@ -45,13 +45,17 @@ export function JoinForm({
   const [pending, start] = useTransition();
   const [formError, setFormError] = useState<string | null>(null);
   const [phoneValue, setPhoneValue] = useState("");
+  const [removePhone, setRemovePhone] = useState(false);
+  const [phoneIncomplete, setPhoneIncomplete] = useState(false);
   const [phoneError, setPhoneError] = useState<string | undefined>();
 
   function onSubmit(values: FieldValues) {
     setFormError(null);
     setPhoneError(undefined);
+    // The number is optional, but a half-typed one must not be silently dropped.
+    if (phoneIncomplete) return setPhoneError("That number looks incomplete. Finish it, or clear the field to share only your profile details.");
     start(async () => {
-      const res = await saveProfileAction(role, normalizeEmpty(values), phoneValue || undefined);
+      const res = await saveProfileAction(role, normalizeEmpty(values), phoneValue || undefined, removePhone && !phoneValue);
       // On success the action redirects to the dashboard, so only failures come back here.
       if (!res || res.ok) return;
       for (const [path, message] of Object.entries(res.fieldErrors)) {
@@ -104,9 +108,7 @@ export function JoinForm({
         <NumberField name="totalYears" label="Years of work experience" min={0} max={50} />
 
         {role === "guide" && (
-          <>
-            <PhoneField last4={phone.last4} value={phoneValue} onChange={setPhoneValue} error={phoneError} defaultCountry={DEFAULT_COUNTRY} />
-          </>
+          <PhoneField last4={phone.last4} value={phoneValue} onChange={setPhoneValue} error={phoneError} defaultCountry={DEFAULT_COUNTRY} removed={removePhone} onRemovedChange={setRemovePhone} onIncompleteChange={setPhoneIncomplete} />
         )}
 
         {!editing && (
