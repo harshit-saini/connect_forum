@@ -1,10 +1,11 @@
 import "server-only";
 import { and, count, desc, eq, lt, sql } from "drizzle-orm";
 import { optionalFreeText } from "@/schemas/common";
-import type { SeekerProfileData } from "@/schemas";
+import type { GuideProfileData, SeekerProfileData } from "@/schemas";
 import { audit } from "@/server/audit";
+import { guideDisplayName, seekerDisplayName } from "@/lib/display";
 import { db } from "@/server/db/client";
-import { blocks, connectionRequests, guideProfiles, matches, reports, seekerProfiles, unlocks, userAliases, users } from "@/server/db/schema";
+import { blocks, connectionRequests, guideProfiles, matches, reports, seekerProfiles, unlocks, users } from "@/server/db/schema";
 import { env } from "@/server/env";
 import { queue } from "@/server/jobs";
 import { publicSeeker, type PublicSeeker } from "@/server/matching/public";
@@ -69,7 +70,7 @@ export type ReviewState =
   | { state: "invalid" }
   | { state: "expired" }
   | { state: "answered"; outcome: "approved" | "declined" | "expired" | "cancelled" }
-  | { state: "open"; requestId: string; tokenHash: string; seekerAlias: string; seeker: PublicSeeker; note: string | null; expiresAt: Date };
+  | { state: "open"; requestId: string; tokenHash: string; seekerName: string; seeker: PublicSeeker; note: string | null; expiresAt: Date };
 
 /** Read-only lookup for the review page. Never consumes the token, so link scanners are harmless. */
 export async function loadReview(token: string): Promise<ReviewState> {
@@ -81,9 +82,8 @@ export async function loadReview(token: string): Promise<ReviewState> {
   if (r.expiresAt.getTime() < Date.now()) return { state: "expired" };
 
   const [profile] = await db().select().from(seekerProfiles).where(eq(seekerProfiles.userId, r.seekerId)).limit(1);
-  const [alias] = await db().select().from(userAliases).where(eq(userAliases.userId, r.seekerId)).limit(1);
-  if (!profile || !alias) return { state: "invalid" };
-  return { state: "open", requestId: r.id, tokenHash, seekerAlias: alias.alias, seeker: publicSeeker(profile.data as unknown as SeekerProfileData), note: r.note, expiresAt: r.expiresAt };
+  if (!profile) return { state: "invalid" };
+  return { state: "open", requestId: r.id, tokenHash, seekerName: seekerDisplayName(profile.data as unknown as SeekerProfileData), seeker: publicSeeker(profile.data as unknown as SeekerProfileData), note: r.note, expiresAt: r.expiresAt };
 }
 
 export type DecideResult =
@@ -148,13 +148,14 @@ export async function expireRequests(): Promise<number> {
   return rows.length;
 }
 
-export type SeekerConnection = { id: string; alias: string; status: string; note: string | null; createdAt: Date; expiresAt: Date; approvedAt: Date | null };
+export type SeekerConnection = { id: string; name: string; status: string; note: string | null; createdAt: Date; expiresAt: Date; approvedAt: Date | null };
 
 export async function listSeekerConnections(seekerId: string): Promise<SeekerConnection[]> {
-  return db()
-    .select({ id: connectionRequests.id, alias: userAliases.alias, status: connectionRequests.status, note: connectionRequests.note, createdAt: connectionRequests.createdAt, expiresAt: connectionRequests.expiresAt, approvedAt: connectionRequests.approvedAt })
+  const rows = await db()
+    .select({ id: connectionRequests.id, data: guideProfiles.data, status: connectionRequests.status, note: connectionRequests.note, createdAt: connectionRequests.createdAt, expiresAt: connectionRequests.expiresAt, approvedAt: connectionRequests.approvedAt })
     .from(connectionRequests)
-    .innerJoin(userAliases, eq(userAliases.userId, connectionRequests.guideId))
+    .innerJoin(guideProfiles, eq(guideProfiles.userId, connectionRequests.guideId))
     .where(eq(connectionRequests.seekerId, seekerId))
     .orderBy(desc(connectionRequests.createdAt));
+  return rows.map(({ data, ...r }) => ({ ...r, name: guideDisplayName(data as unknown as GuideProfileData) }));
 }

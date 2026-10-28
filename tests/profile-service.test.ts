@@ -1,10 +1,10 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { db } from "@/server/db/client";
 import { counters, guideProfiles, phoneVault, seekerProfiles, userRoles } from "@/server/db/schema";
 import { loadProfileState, saveProfile } from "@/server/profile/service";
 import { openRow } from "@/server/vault";
-import { createUser, guideForm, nextGuideMemberId, PHONE, seekerForm, uniqueAlias } from "./fixtures";
+import { createUser, guideForm, nextGuideMemberId, PHONE, seekerForm } from "./fixtures";
 
 const poolVersion = async () => (await db().select().from(counters).where(eq(counters.name, "guide_pool_version")))[0]?.value ?? 0;
 
@@ -39,15 +39,14 @@ describe("seeker registration", () => {
     if (!r.ok) expect(Object.keys(r.fieldErrors).sort()).toEqual(["agree", "category", "query"]);
   });
 
-  it("enforces unique aliases case-insensitively, allows keeping your own, and blocks reserved ones", async () => {
-    const alias = uniqueAlias("Dup");
-    const a = await createUser();
-    const b = await createUser();
-    const form = seekerForm({ alias });
-    expect(await saveProfile({ userId: a.id, role: "seeker", values: form })).toMatchObject({ ok: true });
-    expect(await saveProfile({ userId: a.id, role: "seeker", values: form })).toMatchObject({ ok: true });
-    expect(await saveProfile({ userId: b.id, role: "seeker", values: seekerForm({ alias: alias.toUpperCase() }) })).toEqual({ ok: false, fieldErrors: { alias: "That alias is already taken" } });
-    expect(await saveProfile({ userId: b.id, role: "seeker", values: seekerForm({ alias: "Admin" }) })).toMatchObject({ ok: false, fieldErrors: { alias: expect.any(String) } });
+  it("stores no alias: an alias key in the form is dropped and the profile has none", async () => {
+    const u = await createUser();
+    const form = { ...seekerForm(), alias: "Curious Falcon" };
+    expect(await saveProfile({ userId: u.id, role: "seeker", values: form })).toMatchObject({ ok: true });
+    const [p] = await db().select().from(seekerProfiles).where(eq(seekerProfiles.userId, u.id));
+    expect(p?.data).not.toHaveProperty("alias");
+    expect(await loadProfileState(u.id, "seeker")).toMatchObject({ completed: true });
+    expect((await loadProfileState(u.id, "seeker")).data).not.toHaveProperty("alias");
   });
 });
 
@@ -101,10 +100,37 @@ describe("member ID check", () => {
     expect(p?.profileVersion).toBe(4);
   });
 
-  it("keeps one role per account", async () => {
-    const u = await createUser("seeker");
+  it("keeps one completed role per account", async () => {
+    const u = await createUser();
+    expect(await saveProfile({ userId: u.id, role: "seeker", values: seekerForm() })).toMatchObject({ ok: true });
     const r = await saveProfile({ userId: u.id, role: "guide", values: guideForm(), phone: PHONE });
-    expect(r).toMatchObject({ ok: false, fieldErrors: { _: expect.stringContaining("registered as a Seeker") } });
+    expect(r).toMatchObject({ ok: false, fieldErrors: { _: expect.stringMatching(/already registered as a Seeker.*different email/) } });
+    expect((await db().select().from(userRoles).where(eq(userRoles.userId, u.id)))[0]?.role).toBe("seeker");
+    expect(await db().select().from(guideProfiles).where(eq(guideProfiles.userId, u.id))).toHaveLength(0);
+  });
+
+  it("replaces a stale role row (profile never completed) when the account registers as the other role", async () => {
+    // An incomplete Guide row, and a legacy Seeker row without a member ID, both count as not registered.
+    const staleGuide = await createUser("guide");
+    await db().insert(guideProfiles).values({ userId: staleGuide.id, data: {}, profileVersion: 0 });
+    expect(await saveProfile({ userId: staleGuide.id, role: "seeker", values: seekerForm() })).toEqual({ ok: true, created: true });
+    expect((await db().select().from(userRoles).where(eq(userRoles.userId, staleGuide.id)))).toMatchObject([{ role: "seeker" }]);
+    expect((await loadProfileState(staleGuide.id, "seeker")).completed).toBe(true);
+
+    const legacySeeker = await createUser("seeker");
+    await db().insert(seekerProfiles).values({ userId: legacySeeker.id, data: { old: "answers" }, profileCompletedAt: new Date(), profileVersion: 2 });
+    expect(await saveProfile({ userId: legacySeeker.id, role: "guide", values: guideForm(), phone: PHONE })).toEqual({ ok: true, created: true });
+    expect((await db().select().from(userRoles).where(eq(userRoles.userId, legacySeeker.id)))).toMatchObject([{ role: "guide" }]);
+    expect((await loadProfileState(legacySeeker.id, "guide")).completed).toBe(true);
+  });
+
+  it("refuses the other role once a role is completed, and says to use a different email", async () => {
+    const g = await createUser();
+    expect(await saveProfile({ userId: g.id, role: "guide", values: guideForm(), phone: PHONE })).toMatchObject({ ok: true });
+    const r = await saveProfile({ userId: g.id, role: "seeker", values: seekerForm() });
+    expect(r).toEqual({ ok: false, fieldErrors: { _: "This email is already registered as a Guide. Use a different email address." } });
+    expect((await db().select().from(userRoles).where(eq(userRoles.userId, g.id)))[0]?.role).toBe("guide");
+    expect(await db().select().from(seekerProfiles).where(eq(seekerProfiles.userId, g.id))).toHaveLength(0);
   });
 });
 
@@ -140,8 +166,8 @@ describe("guide registration", () => {
     await saveProfile({ userId: u.id, role: "guide", values: form, phone: PHONE });
     const before = await poolVersion();
 
-    // The saved number is reused when no new one is given; changing only the alias is not matching-relevant.
-    expect(await saveProfile({ userId: u.id, role: "guide", values: { ...form, alias: uniqueAlias("Renamed") } })).toMatchObject({ ok: true, created: false });
+    // The saved number is reused when no new one is given; a leftover alias key is not matching-relevant.
+    expect(await saveProfile({ userId: u.id, role: "guide", values: { ...form, alias: "Renamed" } })).toMatchObject({ ok: true, created: false });
     expect(await poolVersion()).toBe(before);
     expect((await db().select().from(guideProfiles).where(eq(guideProfiles.userId, u.id)))[0]!.profileVersion).toBe(1);
 
@@ -150,5 +176,26 @@ describe("guide registration", () => {
     const [g] = await db().select().from(guideProfiles).where(eq(guideProfiles.userId, u.id));
     expect(g!.profileVersion).toBe(2);
     expect(g!.categories).toEqual(["uncertainty"]);
+  });
+});
+
+describe("legacy alias data", () => {
+  it("is never returned to the member or exported, even when an old row still carries one", async () => {
+    const { buildExport } = await import("@/server/account");
+    const u = await createUser();
+    await saveProfile({ userId: u.id, role: "seeker", values: seekerForm() });
+    await db().update(seekerProfiles).set({ data: sql`${seekerProfiles.data} || '{"alias":"OldAlias42"}'::jsonb` }).where(eq(seekerProfiles.userId, u.id));
+    expect((await loadProfileState(u.id, "seeker")).data).not.toHaveProperty("alias");
+    expect(JSON.stringify(await buildExport(u.id))).not.toContain("OldAlias42");
+  });
+
+  it("serialises two simultaneous registrations for one account into a single role", async () => {
+    const u = await createUser();
+    const [a, b] = await Promise.all([
+      saveProfile({ userId: u.id, role: "seeker", values: seekerForm() }),
+      saveProfile({ userId: u.id, role: "guide", values: guideForm(), phone: PHONE }),
+    ]);
+    expect([a.ok, b.ok].filter(Boolean)).toHaveLength(1); // the loser is told the account is already registered
+    expect(await db().select().from(userRoles).where(eq(userRoles.userId, u.id))).toHaveLength(1);
   });
 });

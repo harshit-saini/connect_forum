@@ -7,7 +7,7 @@ import { screenText } from "@/lib/screening";
 const MAX = 300;
 
 /** "I want to connect": an optional short note, screened for contact details, then a request. */
-export function ConnectButton({ matchId, alias, onDone }: { matchId: string; alias: string; onDone: () => void }) {
+export function ConnectButton({ matchId, name, onDone }: { matchId: string; name: string; onDone: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -41,8 +41,8 @@ export function ConnectButton({ matchId, alias, onDone }: { matchId: string; ali
     <>
       <Button type="button" onClick={() => dialog.current?.showModal()}>I want to connect</Button>
       <dialog ref={dialog} aria-labelledby={`connect-${matchId}`} className="m-auto w-[min(92vw,28rem)] rounded-2xl border border-border bg-card p-6 text-foreground backdrop:bg-black/50">
-        <h2 id={`connect-${matchId}`} className="text-xl font-semibold">Connect with {alias}</h2>
-        <p className="mt-1 text-sm text-muted">They&apos;ll see your alias and career details, never your contact information. If they approve, you&apos;ll see their number here.</p>
+        <h2 id={`connect-${matchId}`} className="text-xl font-semibold">Connect with {name}</h2>
+        <p className="mt-1 text-sm text-muted">They&apos;ll see your question and career details, never your name or contact details. If they approve, you&apos;ll see their number here.</p>
         <label htmlFor={`note-${matchId}`} className="mt-4 flex justify-between text-sm font-medium">
           <span>Add a short note <span className="font-normal text-muted">(optional)</span></span>
           <span className="text-xs font-normal text-muted">{note.length}/{MAX}</span>

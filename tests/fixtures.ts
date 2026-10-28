@@ -9,8 +9,6 @@ export async function createUser(role?: "seeker" | "guide", email = `u-${randomU
   return u!;
 }
 
-export const uniqueAlias = (p = "Test") => `${p}${Math.random().toString(36).slice(2, 8)}`;
-
 let seekerIds = 0;
 let guideIds = 0;
 /** The next member ID on the test allow-list (see tests/helpers/setup.ts). */
@@ -20,15 +18,14 @@ export const nextGuideMemberId = () => `G${process.env.TEST_MEMBER_PREFIX}${guid
 export const PHONE = "+919876543210";
 
 export type SeekerForm = {
-  alias: string; memberId: string; category: string; query: string; totalYears: number; agree: boolean;
+  memberId: string; category: string; query: string; totalYears: number; agree: boolean;
 };
 export type GuideForm = {
-  alias: string; memberId: string; categories: string[]; jobTitle: string; totalYears: number; about: string;
+  memberId: string; categories: string[]; jobTitle: string; totalYears: number; about: string;
   agree: boolean;
 };
 
 export const seekerForm = (over: Partial<SeekerForm> = {}): SeekerForm => ({
-  alias: uniqueAlias("Seek"),
   memberId: nextSeekerMemberId(),
   category: "career_stagnation",
   query: "I have been in the same role for five years and do not know how to move up.",
@@ -38,7 +35,6 @@ export const seekerForm = (over: Partial<SeekerForm> = {}): SeekerForm => ({
 });
 
 export const guideForm = (over: Partial<GuideForm> = {}): GuideForm => ({
-  alias: uniqueAlias("Guide"),
   memberId: nextGuideMemberId(),
   categories: ["career_stagnation", "uncertainty"],
   jobTitle: "Engineering manager",

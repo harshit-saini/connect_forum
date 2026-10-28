@@ -110,7 +110,7 @@ export function FindGuides({ initial, ai = false }: { initial: RunView | null; a
         <ol className="space-y-4">
           {view.matches.map((m) => (
             <li key={m.matchId}>
-              <MatchCardView match={m} ai={ai} action={<ConnectButton matchId={m.matchId} alias={m.alias} onDone={() => void load(view!.id)} />} />
+              <MatchCardView match={m} ai={ai} action={<ConnectButton matchId={m.matchId} name={m.name} onDone={() => void load(view!.id)} />} />
             </li>
           ))}
         </ol>

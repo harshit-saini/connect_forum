@@ -175,7 +175,7 @@ describe("reviewing and deciding", () => {
     await processJobs({ maxMs: 20_000 });
     const mail = (await emailsTo(p.seeker.user.email)).find((m) => m.subject.includes("update on your request"))!;
     expect(mail.text).toMatch(/other matches/i);
-    expect(mail.text).not.toContain(p.guide.form.alias);
+    expect(mail.text).not.toContain(p.guide.form.jobTitle);
   });
 
   it("lets exactly one of several simultaneous decisions win", async () => {

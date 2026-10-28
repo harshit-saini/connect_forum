@@ -1,16 +1,10 @@
 import { z } from "zod";
 import { CATEGORIES } from "@/config/taxonomy";
 import { MEMBER_ID_SHAPE, normalizeMemberId } from "@/lib/member-id";
+import { roleTitleProblem } from "@/lib/screening";
 import { enumOf, freeText, years } from "./common";
 
 export const E164 = /^\+[1-9]\d{6,14}$/;
-
-const alias = z
-  .string()
-  .trim()
-  .min(3, "At least 3 characters")
-  .max(24, "At most 24 characters")
-  .regex(/^[A-Za-z0-9 _-]+$/, "Letters, numbers, spaces, _ and - only");
 
 /** Shape only. Whether the ID is on the allow-list is checked on the server (src/server/members.ts). */
 const memberId = z
@@ -22,7 +16,6 @@ const memberId = z
 const agree = z.literal(true, { error: "Required to continue" });
 
 export const seekerFormSchema = z.object({
-  alias,
   memberId,
   category: enumOf(CATEGORIES),
   /** The Seeker's question, in their own words. Screened for contact details. */
@@ -32,10 +25,13 @@ export const seekerFormSchema = z.object({
 });
 
 export const guideFormSchema = z.object({
-  alias,
   memberId,
   categories: z.array(enumOf(CATEGORIES)).min(1, "Pick at least 1 category").max(CATEGORIES.length),
-  jobTitle: freeText(2, 80),
+  /** Shown to Seekers as the Guide's name, so it must be a role and not a person. */
+  jobTitle: freeText(2, 80).superRefine((v, ctx) => {
+    const problem = roleTitleProblem(v);
+    if (problem) ctx.addIssue({ code: "custom", message: problem });
+  }),
   totalYears: years,
   about: freeText(30, 500),
   agree,

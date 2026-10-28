@@ -45,8 +45,8 @@ export default async function ReviewPage({ params }: { params: Promise<{ token: 
   return (
     <div className="mx-auto mt-6 max-w-2xl space-y-6">
       <div>
-        <h1 className="text-3xl font-semibold">{review.seekerAlias} would like your guidance</h1>
-        <p className="mt-1 text-muted">Only their alias and career details are shown. No contact information is shared unless you approve.</p>
+        <h1 className="text-3xl font-semibold">{review.seekerName} would like your guidance</h1>
+        <p className="mt-1 text-muted">Only their question and career details are shown, never their name. No contact information is shared unless you approve.</p>
       </div>
       <Card>
         <dl className="space-y-4 text-sm">
@@ -58,7 +58,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ token: 
       </Card>
       <ReviewForm token={token} csrf={csrfFor(review.tokenHash)} />
       <div className="border-t border-border pt-4">
-        <GuideSafety token={token} csrf={csrfFor(review.tokenHash)} alias={review.seekerAlias} />
+        <GuideSafety token={token} csrf={csrfFor(review.tokenHash)} name={review.seekerName} />
       </div>
     </div>
   );

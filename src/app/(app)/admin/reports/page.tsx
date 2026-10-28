@@ -24,7 +24,7 @@ export default async function AdminReports({ searchParams }: { searchParams: Pro
           <li key={r.id}>
             <Card className="space-y-3">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <p><strong>{r.reporterAlias ?? "(deleted)"}</strong> reported <strong>{r.reportedAlias ?? "(deleted)"}</strong></p>
+                <p><strong>{r.reporterEmail ?? "(deleted)"}</strong> reported <strong>{r.reportedEmail ?? "(deleted)"}</strong></p>
                 <span className="rounded-full border border-border px-2 py-0.5 text-xs">{r.status}</span>
               </div>
               <p className="text-sm">{REPORT_REASONS.find((x) => x.value === r.reason)?.label ?? r.reason}{r.details ? `: ${r.details}` : ""}</p>
@@ -34,7 +34,7 @@ export default async function AdminReports({ searchParams }: { searchParams: Pro
                   <form action={reviewReportAction}><input type="hidden" name="reportId" value={r.id} /><input type="hidden" name="outcome" value="reviewed" /><Button type="submit" variant="outline" className="min-h-9">Mark reviewed</Button></form>
                   <form action={reviewReportAction}><input type="hidden" name="reportId" value={r.id} /><input type="hidden" name="outcome" value="dismissed" /><Button type="submit" variant="ghost" className="min-h-9">Dismiss</Button></form>
                   {!r.reportedSuspended && (
-                    <form action={suspendUserAction}><input type="hidden" name="userId" value={r.reportedId} /><input type="hidden" name="reason" value="Suspended after a report" /><Button type="submit" variant="danger" className="min-h-9">Suspend {r.reportedAlias ?? "user"}</Button></form>
+                    <form action={suspendUserAction}><input type="hidden" name="userId" value={r.reportedId} /><input type="hidden" name="reason" value="Suspended after a report" /><Button type="submit" variant="danger" className="min-h-9">Suspend {r.reportedEmail ?? "user"}</Button></form>
                   )}
                 </div>
               )}

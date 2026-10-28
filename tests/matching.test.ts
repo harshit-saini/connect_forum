@@ -83,7 +83,7 @@ describe("the Find guides run", () => {
     expect(view.status).toBe("done");
     expect(view.matches.length).toBe(5);
     expect(view.llmUsed).toBe(true);
-    expect(view.matches.every((m) => m.final && m.explanation.length > 10 && m.alias)).toBe(true);
+    expect(view.matches.every((m) => m.final && m.explanation.length > 10 && m.name)).toBe(true);
     expect(view.matches.map((m) => m.rank)).toEqual([1, 2, 3, 4, 5]);
     // scores are descending
     const scores = view.matches.map((m) => m.score);

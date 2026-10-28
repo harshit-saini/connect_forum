@@ -6,7 +6,7 @@ import { FormProvider, useForm, type FieldValues, type Resolver } from "react-ho
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { CheckboxField, MultiCheckField, NumberField, RadioField, TextAreaField, TextField } from "@/components/form/controls";
-import { AliasField, PhoneField } from "@/components/form/special";
+import { PhoneField } from "@/components/form/special";
 import { CATEGORIES } from "@/config/taxonomy";
 import { DEFAULT_COUNTRY } from "@/lib/countries";
 import { formSchema, normalizeEmpty, type Role } from "@/schemas";
@@ -73,7 +73,6 @@ export function JoinForm({
           autoComplete="off"
           max={40}
         />
-        <AliasField />
 
         {role === "seeker" ? (
           <>
@@ -90,7 +89,7 @@ export function JoinForm({
         ) : (
           <>
             <MultiCheckField name="categories" label="Which categories can you help with?" options={CATEGORIES} />
-            <TextField name="jobTitle" label="Your current or last role" max={80} placeholder="e.g. Senior HR Manager" />
+            <TextField name="jobTitle" label="Your current or last role" hint="Shown to Seekers instead of your name. Use a role, not your name or employer." max={80} placeholder="e.g. Senior HR Manager" />
             <TextAreaField
               name="about"
               label="How can you help?"

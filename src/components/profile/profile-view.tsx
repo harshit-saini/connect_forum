@@ -18,7 +18,6 @@ export function ProfileView({ role, data, memberId, phone }: { role: Role; data:
   return (
     <Card className="space-y-3">
       <dl className="space-y-2">
-        <Item label="Alias" value={d.alias} />
         <Item label="Member ID (private)" value={memberId} />
         {role === "seeker" ? (
           <>

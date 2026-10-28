@@ -17,7 +17,7 @@ test("a guide registers on one page; the phone goes to the vault and is never ec
   await expect(page.getByRole("heading", { name: "Register as a Guide" })).toBeVisible();
 
   await page.getByLabel("Member ID").fill(E2E_IDS.guide[0]!);
-  await page.getByRole("button", { name: "Suggest" }).click();
+  await expect(page.getByLabel("Alias")).toHaveCount(0);
   await page.getByRole("checkbox", { name: /Career Stagnation/ }).check();
   await page.getByRole("checkbox", { name: /Uncertainty/ }).check();
   await page.getByLabel("Your current or last role").fill("Engineering manager");

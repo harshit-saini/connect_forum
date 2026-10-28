@@ -5,7 +5,7 @@ import { matchingCopy } from "@/lib/branding";
 import { env } from "@/server/env";
 
 const baseSteps = [
-  ["Tell us your question", "A one-page form with your member ID. You appear only under an alias you choose."],
+  ["Tell us your question", "A one-page form with your member ID. Others never see your name, only your category and experience."],
   null, // replaced by the matching step (see matchingCopy)
   ["Guide approves", "A Guide sees your anonymous request and decides. No approval, no contact."],
   ["Talk directly", "After approval you see the Guide's number in the portal and contact them yourself. Then rate the experience."],
@@ -56,7 +56,7 @@ export default async function Landing({ searchParams }: { searchParams: Promise<
       <section aria-labelledby="privacy" className="rounded-2xl bg-accent p-6 sm:p-8">
         <h2 id="privacy" className="text-2xl font-semibold">Our privacy promise</h2>
         <ul className="mt-3 list-disc space-y-1.5 pl-5">
-          <li>Only aliases are visible. No real names, photos, age, gender or religion are collected.</li>
+          <li>Names, emails and phone numbers are never shown to the other side. No real names, photos, age, gender or religion are collected.</li>
           <li>A Guide&apos;s phone number is encrypted and shown only to a Seeker that Guide approved.</li>
           <li>We never relay messages. Conversations happen outside the portal, on your terms.</li>
           <li>You can export or delete your data at any time.</li>

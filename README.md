@@ -2,7 +2,7 @@
 
 A Next.js (App Router, TypeScript) PWA, deployed on Vercel, with no separate backend.
 
-**Seekers** want career help; **Guides** are experienced people ready to give it. Both stay anonymous (aliases only) until a Guide approves a connection. An AI ranks Guides for each Seeker from the career profile each user fills in. The platform never relays messages: after approval the Seeker sees the Guide's phone number in the portal and contacts the Guide directly, outside the portal. Afterwards the Seeker rates the Guide, and ratings feed future matching.
+**Seekers** want career help; **Guides** are experienced people ready to give it. Both stay anonymous (no names, emails or phone numbers are shown) until a Guide approves a connection. An AI ranks Guides for each Seeker from the career profile each user fills in. The platform never relays messages: after approval the Seeker sees the Guide's phone number in the portal and contacts the Guide directly, outside the portal. Afterwards the Seeker rates the Guide, and ratings feed future matching.
 
 - [Quick start](#quick-start)
 - [How it works](#how-it-works)
@@ -74,7 +74,7 @@ src/
   components/            ui/ (shadcn-style primitives), form/, join/ (the one-page form), faq/, profile/, matches/, safety/, pwa/
   config/                taxonomy.ts (all option lists), matching.ts (all weights/limits), safety.ts
   schemas/               zod schemas shared by browser and server (one seeker form, one guide form)
-  lib/                   screening.ts (contact-detail screening), countries, alias, utils
+  lib/                   screening.ts (contact-detail screening), countries, display, utils
   server/                server-only code (`import "server-only"`)
     db/                  Drizzle client + schema (auth, core, profiles, jobs, matching)
     auth.ts              Better Auth (email OTP)
@@ -242,7 +242,7 @@ All matching weights and limits are in `src/config/matching.ts`; all option list
 
 ## Security and privacy model
 
-- **Anonymity**: only aliases are visible between users. No API returns another user's e-mail, real name, LinkedIn, private fields, exclusion list or phone, except the phone through the reveal endpoint. Matching never uses gender, age, religion, caste, marital status, photo or real name (none is collected).
+- **Anonymity**: users see each other only by role/category and experience; there are no aliases. No API returns another user's e-mail, real name, LinkedIn, private fields, exclusion list or phone, except the phone through the reveal endpoint. Matching never uses gender, age, religion, caste, marital status, photo or real name (none is collected).
 - **Phone numbers**: encrypted at rest in their own table; never in drafts, logs, e-mails, AI prompts, audit rows or cached responses (tests assert each). The service worker cannot cache them: it never intercepts API, auth, review or personal pages.
 - **AI**: only an explicit public projection of each profile is sent to the model, as JSON inside delimited data blocks, with instructions to ignore any instructions inside them. Output is schema-validated, retried once, then replaced by the non-LLM ranking. Free text is screened for contact details on input.
 - **Tokens**: 256-bit random, only the SHA-256 hash is stored, single-use, 7-day expiry. Opening the link is read-only; approving is a POST with a signed CSRF value bound to the token, under a row lock.

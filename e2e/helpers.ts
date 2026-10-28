@@ -82,8 +82,6 @@ export async function registerSeeker(page: Page, memberId: string, category = "C
   await page.goto("/join/seeker");
   await expect(page.getByRole("heading", { name: "Ask for guidance" })).toBeVisible();
   await page.getByLabel("Member ID").fill(memberId);
-  await page.getByRole("button", { name: "Suggest" }).click();
-  await expect(page.getByLabel("Alias")).not.toHaveValue("");
   await page.getByRole("radio", { name: new RegExp(category) }).check();
   await page.getByLabel("Your question").fill("I have been in the same role for five years and want to move into product management but do not know where to start.");
   await page.getByLabel("Years of work experience").fill("5");

@@ -54,7 +54,7 @@ export function screenText(input: string | undefined | null): ScreenResult {
     result.errors.push(CONTACT_ERROR);
   }
   if (NAME_INTRO.test(text) || NAME_TITLE.test(text)) {
-    result.warnings.push("This looks like a personal name. Names are never shown. Use your alias instead.");
+    result.warnings.push("This looks like a personal name. Names are never shown to anyone, so leave yours out.");
   }
   if (COMPANY_SUFFIX.test(text)) {
     result.warnings.push("Avoid naming companies. Describe the role or kind of company instead.");
@@ -63,6 +63,18 @@ export function screenText(input: string | undefined | null): ScreenResult {
     result.warnings.push("Please don't share confidential company details.");
   }
   return result;
+}
+
+const RESERVED_WORDS = /\b(?:admin|administrator|support|moderator|connect|system|staff|help|official)\b/i;
+
+/**
+ * A Guide's role title is the only thing Seekers see as their "name", so it must be a role, not a person
+ * (a bare name can't be detected reliably) and must not pose as staff. Returns an error message or null.
+ */
+export function roleTitleProblem(value: string): string | null {
+  if (NAME_INTRO.test(value) || NAME_TITLE.test(value)) return "Use a role such as “Senior HR Manager”, not a name.";
+  if (RESERVED_WORDS.test(value)) return "That wording is reserved. Describe your role instead.";
+  return null;
 }
 
 /** Lowercase alphanumeric form used to compare company names ("Google LLC" ~ "google"). */

@@ -3,7 +3,8 @@ import { and, asc, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { MATCHING } from "@/config/matching";
 import type { GuideProfileData } from "@/schemas";
 import { db } from "@/server/db/client";
-import { connectionRequests, guideProfiles, jobs, matchRuns, matches, userAliases } from "@/server/db/schema";
+import { connectionRequests, guideProfiles, jobs, matchRuns, matches } from "@/server/db/schema";
+import { guideDisplayName } from "@/lib/display";
 import { kickWorker } from "@/server/jobs/kick";
 import { publicGuide, type PublicGuide } from "./public";
 import { ratingStats } from "./candidates";
@@ -11,7 +12,8 @@ import { ratingStats } from "./candidates";
 export type MatchCard = {
   matchId: string;
   rank: number;
-  alias: string;
+  /** The Guide's role: the only identity a Guide has. */
+  name: string;
   /** 0–100, rounded. */
   score: number;
   explanation: string;
@@ -42,9 +44,8 @@ export async function getRunView(runId: string, seekerId: string): Promise<RunVi
   if (!run) return null;
 
   const rows = await db()
-    .select({ m: matches, alias: userAliases.alias, data: guideProfiles.data })
+    .select({ m: matches, data: guideProfiles.data })
     .from(matches)
-    .innerJoin(userAliases, eq(userAliases.userId, matches.guideId))
     .innerJoin(guideProfiles, eq(guideProfiles.userId, matches.guideId))
     .where(and(eq(matches.runId, runId), isNotNull(guideProfiles.memberId)))
     .orderBy(asc(matches.rank));
@@ -74,12 +75,12 @@ export async function getRunView(runId: string, seekerId: string): Promise<RunVi
     error: run.status === "failed" ? "We couldn't finish this search. Please try again later." : null,
     startedAt: run.startedAt.toISOString(),
     finishedAt: run.finishedAt?.toISOString() ?? null,
-    matches: rows.map(({ m, alias, data }) => {
+    matches: rows.map(({ m, data }) => {
       const r = stats.get(m.guideId);
       return {
         matchId: m.id,
         rank: m.rank,
-        alias,
+        name: guideDisplayName(data as unknown as GuideProfileData),
         score: Math.round(m.score * 100),
         explanation: m.explanation,
         final: m.status === "final",

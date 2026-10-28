@@ -11,8 +11,8 @@ test("a seeker registers on one page: the member ID is checked, contact details 
   await expect(page.getByRole("heading", { name: "Ask for guidance" })).toBeVisible();
 
   const question = "I have been in the same role for five years and want to move into product management but do not know where to start.";
-  await page.getByRole("button", { name: "Suggest" }).click();
-  await expect(page.getByLabel("Alias")).not.toHaveValue("");
+  await expect(page.getByLabel("Alias")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Suggest" })).toHaveCount(0);
   await page.getByRole("radio", { name: /Career Stagnation/ }).check();
   await page.getByLabel("Years of work experience").fill("5");
   await page.getByLabel(/I agree to the/).check();

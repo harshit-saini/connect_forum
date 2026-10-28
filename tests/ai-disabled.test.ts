@@ -48,7 +48,7 @@ describe("AI_ENABLED=false", () => {
     expect(view.status).toBe("done");
     expect(view.llmUsed).toBe(false);
     expect(view.degraded).toBe(false); // profile matching is the normal path, not a fallback
-    expect(view.matches.map((m) => m.alias)).toHaveLength(2);
+    expect(view.matches.map((m) => m.name)).toHaveLength(2);
     expect(view.matches.every((m) => m.final && m.explanation.length > 10)).toBe(true);
     // The more experienced, more focused Guide ranks first; a Guide outside the category is not matched.
     const rows = await db().select().from(matches).where(eq(matches.runId, run.runId));

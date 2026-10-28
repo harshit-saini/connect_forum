@@ -2,7 +2,7 @@
 import { SafetyDialog, type SafetyInput } from "@/components/safety/safety-dialog";
 import { reviewSafetyAction } from "@/server/actions/review-safety";
 
-export function GuideSafety({ token, csrf, alias }: { token: string; csrf: string; alias: string }) {
+export function GuideSafety({ token, csrf, name }: { token: string; csrf: string; name: string }) {
   async function submit(input: SafetyInput) {
     const fd = new FormData();
     fd.set("token", token);
@@ -13,5 +13,5 @@ export function GuideSafety({ token, csrf, alias }: { token: string; csrf: strin
     const res = await reviewSafetyAction({}, fd);
     return res.error ?? null;
   }
-  return <SafetyDialog who={alias} onSubmit={submit} />;
+  return <SafetyDialog who={name} onSubmit={submit} />;
 }

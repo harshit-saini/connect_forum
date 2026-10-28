@@ -7,7 +7,8 @@ import { SeekerSafety } from "@/components/safety/seeker-safety";
 import { Card } from "@/components/ui/card";
 import type { GuideProfileData } from "@/schemas";
 import { db } from "@/server/db/client";
-import { connectionRequests, guideProfiles, userAliases } from "@/server/db/schema";
+import { connectionRequests, guideProfiles } from "@/server/db/schema";
+import { guideDisplayName } from "@/lib/display";
 import { publicGuide } from "@/server/matching/public";
 import { requireCompletedProfile } from "@/server/viewer";
 
@@ -20,21 +21,21 @@ export default async function ConnectionPage({ params }: { params: Promise<{ id:
   if (!z.uuid().safeParse(id).success) notFound();
 
   const [row] = await db()
-    .select({ req: connectionRequests, alias: userAliases.alias, data: guideProfiles.data })
+    .select({ req: connectionRequests, data: guideProfiles.data })
     .from(connectionRequests)
-    .innerJoin(userAliases, eq(userAliases.userId, connectionRequests.guideId))
     .innerJoin(guideProfiles, eq(guideProfiles.userId, connectionRequests.guideId))
     .where(and(eq(connectionRequests.id, id), eq(connectionRequests.seekerId, viewer.id)));
   if (!row) notFound();
 
   const guide = publicGuide(row.data as unknown as GuideProfileData);
+  const name = guideDisplayName(row.data as unknown as GuideProfileData);
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div className="flex items-baseline justify-between">
-        <h1 className="text-3xl font-semibold">{row.alias}</h1>
+        <h1 className="text-3xl font-semibold">{name}</h1>
         <Link href="/seeker/connections" className="text-sm underline">All requests</Link>
       </div>
-      <p className="text-muted">{guide.title} · {guide.years} yrs</p>
+      <p className="text-muted">{guide.years} years of experience</p>
 
       {row.req.status === "approved" ? (
         <RevealNumber connectionId={row.req.id} />
@@ -47,7 +48,7 @@ export default async function ConnectionPage({ params }: { params: Promise<{ id:
       {row.req.status === "approved" && (
         <Card className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="font-semibold">Spoke with {row.alias}?</h2>
+            <h2 className="font-semibold">Spoke with {name}?</h2>
             <p className="text-sm text-muted">Rate your experience. It helps other Seekers.</p>
           </div>
           <Link href={`/seeker/rate/${row.req.id}`} className="inline-flex min-h-11 items-center rounded-lg border border-border bg-card px-4 text-sm font-medium hover:bg-accent">Rate this Guide</Link>
@@ -59,7 +60,7 @@ export default async function ConnectionPage({ params }: { params: Promise<{ id:
         <p className="whitespace-pre-line">{guide.about}</p>
         <p className="text-muted">Can help with: {guide.categories.join(", ")}</p>
       </Card>
-      <SeekerSafety target={{ kind: "connection", id: row.req.id }} who={row.alias} />
+      <SeekerSafety target={{ kind: "connection", id: row.req.id }} who={name} />
     </div>
   );
 }

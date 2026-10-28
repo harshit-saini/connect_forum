@@ -3,8 +3,8 @@ import type { GuideProfileData, SeekerProfileData } from "@/schemas";
 
 /**
  * What the other side may see (PUB fields). This is the ONLY projection of a profile that is sent to
- * the AI or returned by match and request APIs. Alias, member ID, phone and contact data are never
- * included. The alias is added by callers that render a card, not here.
+ * the AI or returned by match and request APIs. Names, member ID, email, phone and contact data are never
+ * included. The display name (see lib/display.ts) is added by callers that render a card, not here.
  */
 export type PublicGuide = {
   title: string;

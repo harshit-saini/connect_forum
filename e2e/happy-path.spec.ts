@@ -21,7 +21,7 @@ test("sign in, register, FAQs, find guides, request, approve, reveal, rate", asy
   await page.getByRole("button", { name: "Find guides" }).click();
   const first = page.getByRole("listitem").filter({ hasText: "Why this Guide" }).first();
   await expect(first).toBeVisible({ timeout: 60_000 });
-  const alias = (await first.getByRole("heading", { level: 3 }).textContent())!;
+  const guideName = (await first.getByRole("heading", { level: 3 }).textContent())!;
 
   // 4. Request
   await first.getByRole("button", { name: "I want to connect" }).click();
@@ -44,7 +44,7 @@ test("sign in, register, FAQs, find guides, request, approve, reveal, rate", asy
 
   // 6. Reveal
   await page.goto("/seeker/connections");
-  await expect(page.getByText(alias)).toBeVisible();
+  await expect(page.getByText(guideName).first()).toBeVisible();
   await page.getByRole("link", { name: "Open" }).click();
   await page.getByRole("button", { name: "Show number" }).click();
   await expect(page.getByTestId("revealed-number")).toHaveText(/^\+9190000000\d\d$/);

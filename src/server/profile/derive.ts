@@ -16,7 +16,7 @@ export function deriveGuide(d: GuideProfileData) {
 }
 
 /** Answers that never affect matching: changing only these leaves profile_version alone. */
-const NON_MATCHING = ["alias", "consentedAt"];
+const NON_MATCHING = ["consentedAt"];
 
 function stable(value: unknown): string {
   return JSON.stringify(value, (_k, v) =>
@@ -24,10 +24,10 @@ function stable(value: unknown): string {
   );
 }
 
-/** Returns the answers with non-matching fields removed. */
+/** Returns the answers with non-matching fields removed. A leftover `alias` key from older data is ignored too. */
 export function matchingView(data: Record<string, unknown> | undefined): Record<string, unknown> {
   const copy = { ...(data ?? {}) };
-  for (const key of NON_MATCHING) delete copy[key];
+  for (const key of [...NON_MATCHING, "alias"]) delete copy[key];
   return copy;
 }
 

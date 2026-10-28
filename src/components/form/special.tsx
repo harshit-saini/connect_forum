@@ -1,29 +1,8 @@
 "use client";
 import { AsYouType, parsePhoneNumberFromString, type CountryCode } from "libphonenumber-js/min";
-import { useState, useTransition } from "react";
-import { useFormContext, type FieldValues } from "react-hook-form";
-import { Button } from "@/components/ui/button";
+import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { COUNTRIES, DEFAULT_COUNTRY } from "@/lib/countries";
-import { suggestAliasAction } from "@/server/actions/profile";
-import { Field } from "./field";
-
-export function AliasField() {
-  const { register, setValue } = useFormContext<FieldValues>();
-  const [pending, start] = useTransition();
-  return (
-    <Field name="alias" label="Alias" hint="Other users only ever see this name. 3–24 letters, numbers, spaces, _ or -. Don't use your real name.">
-      {({ id, describedBy, invalid }) => (
-        <div className="flex gap-2">
-          <Input id={id} maxLength={24} autoComplete="off" aria-invalid={invalid} aria-describedby={describedBy || undefined} placeholder="e.g. CuriousFalcon42" {...register("alias")} />
-          <Button type="button" variant="outline" disabled={pending} onClick={() => start(async () => setValue("alias", await suggestAliasAction(), { shouldDirty: true, shouldValidate: true }))}>
-            {pending ? "…" : "Suggest"}
-          </Button>
-        </div>
-      )}
-    </Field>
-  );
-}
 
 /**
  * Phone input with a country selector. The value is composed to E.164 and lives outside the form state.

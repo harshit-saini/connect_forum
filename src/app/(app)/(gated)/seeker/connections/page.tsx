@@ -35,7 +35,7 @@ export default async function Connections() {
               <li key={r.id}>
                 <Card className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <p className="font-semibold">{r.alias}</p>
+                    <p className="font-semibold">{r.name}</p>
                     <p className="text-sm text-muted">Sent {r.createdAt.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}. {s.hint}</p>
                   </div>
                   <div className="flex items-center gap-3">

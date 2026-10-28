@@ -3,15 +3,15 @@ import { EmailLayout } from "./layout";
 
 const button = { backgroundColor: "#0f766e", borderRadius: 8, color: "#fff", padding: "12px 20px" } as const;
 
-/** To a Guide. Alias and public career details only: never any contact information. */
-export function ConnectionRequestEmail({ seekerAlias, category, question, link, days }: { seekerAlias: string; category: string; question: string; link: string; days: number }) {
+/** To a Guide. Public career details only: never any contact information. */
+export function ConnectionRequestEmail({ seekerName, category, question, link, days }: { seekerName: string; category: string; question: string; link: string; days: number }) {
   return (
-    <EmailLayout preview={`${seekerAlias} would like your guidance`}>
+    <EmailLayout preview={`${seekerName} would like your guidance`}>
       <Heading as="h1" style={{ fontSize: 22, margin: "0 0 12px" }}>
         A Seeker would like your guidance
       </Heading>
       <Text>
-        <strong>{seekerAlias}</strong> asked to connect with you.
+        <strong>{seekerName}</strong> asked to connect with you.
       </Text>
       <Text style={{ margin: "4px 0" }}>Category: {category}</Text>
       <Text style={{ margin: "4px 0" }}>Their question: {question}</Text>
@@ -23,14 +23,14 @@ export function ConnectionRequestEmail({ seekerAlias, category, question, link, 
 }
 
 /** To a Seeker. Deliberately does not contain the Guide's number. */
-export function RequestApprovedEmail({ guideAlias, link }: { guideAlias: string; link: string }) {
+export function RequestApprovedEmail({ guideName, link }: { guideName: string; link: string }) {
   return (
-    <EmailLayout preview={`${guideAlias} approved your request`}>
+    <EmailLayout preview={`${guideName} approved your request`}>
       <Heading as="h1" style={{ fontSize: 22, margin: "0 0 12px" }}>
         Your request was approved
       </Heading>
       <Text>
-        <strong>{guideAlias}</strong> approved your request. Sign in to see how to reach them. For your privacy, contact details are never sent by email.
+        <strong>{guideName}</strong> approved your request. Sign in to see how to reach them. For your privacy, contact details are never sent by email.
       </Text>
       <Button href={link} style={button}>Open in Connect</Button>
     </EmailLayout>

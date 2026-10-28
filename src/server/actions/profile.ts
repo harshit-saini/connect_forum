@@ -1,9 +1,8 @@
 "use server";
 import { redirect } from "next/navigation";
-import { generateAlias } from "@/lib/alias";
 import type { Role } from "@/schemas";
 import { kickWorker } from "@/server/jobs/kick";
-import { saveProfile, suggestFreeAlias, type FieldErrors } from "@/server/profile/service";
+import { saveProfile, type FieldErrors } from "@/server/profile/service";
 import { rateLimit } from "@/server/ratelimit";
 import { dashboardPath, requireViewer } from "@/server/viewer";
 
@@ -20,9 +19,4 @@ export async function saveProfileAction(role: Role, values: unknown, phone?: str
   if (!result.ok) return { ok: false, fieldErrors: result.formError ? { ...result.fieldErrors, _: result.formError } : result.fieldErrors };
   kickWorker();
   redirect(dashboardPath(role));
-}
-
-export async function suggestAliasAction(): Promise<string> {
-  await requireViewer();
-  return suggestFreeAlias(generateAlias);
 }

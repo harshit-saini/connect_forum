@@ -27,8 +27,8 @@ export default async function AdminAudit({ searchParams }: { searchParams: Promi
               <tr key={r.id} className="border-t border-border align-top">
                 <td className="whitespace-nowrap p-3">{r.at.toISOString().slice(0, 19).replace("T", " ")}</td>
                 <td className="p-3 font-medium">{r.action}</td>
-                <td className="p-3">{r.actorAlias ?? "—"}</td>
-                <td className="p-3">{r.targetAlias ?? "—"}</td>
+                <td className="p-3">{r.actorEmail ?? "—"}</td>
+                <td className="p-3">{r.targetEmail ?? "—"}</td>
                 <td className="p-3 text-xs text-muted">{Object.keys(r.metadata).length ? JSON.stringify(r.metadata) : ""}</td>
               </tr>
             ))}

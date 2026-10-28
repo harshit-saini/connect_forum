@@ -16,9 +16,6 @@ const arg = (name: string, def: number) => {
   return i > 0 ? Number(process.argv[i + 1]) : def;
 };
 
-const ADJ = ["Bright", "Calm", "Keen", "Bold", "Warm", "Swift", "Kind", "Steady", "Clever", "Brave", "Quiet", "Sunny"];
-const NOUN = ["Falcon", "Maple", "River", "Lantern", "Compass", "Harbor", "Willow", "Summit", "Meadow", "Comet", "Otter", "Cedar"];
-
 const GUIDES = [
   { title: "Director of Product", years: 14, categories: ["career_stagnation", "uncertainty"], about: "I moved from engineering into product and have led product teams for over a decade. I help people who feel stuck decide whether to move up, across or out." },
   { title: "Staff engineer", years: 11, categories: ["career_stagnation", "upskilling_training"], about: "Eleven years building systems and mentoring engineers towards senior roles. I help with choosing what to learn next and how to show growth." },
@@ -67,10 +64,9 @@ async function seedGuide(i: number) {
   const t = GUIDES[i % GUIDES.length]!;
   const u = await ensureUser(`seed-guide-${i + 1}@example.com`);
   if (!u) return false;
-  const alias = `${ADJ[i % ADJ.length]}${NOUN[(i * 5) % NOUN.length]}${10 + i}`;
   const r = await saveProfile({
     userId: u.id, role: "guide", phone: `+9190000000${String(i + 1).padStart(2, "0")}`,
-    values: { alias, memberId: seedGuideId(i), categories: [...t.categories], jobTitle: t.title, totalYears: t.years, about: t.about, agree: true },
+    values: { memberId: seedGuideId(i), categories: [...t.categories], jobTitle: t.title, totalYears: t.years, about: t.about, agree: true },
   });
   if (!r.ok) throw new Error(`guide ${i + 1}: ${JSON.stringify(r.fieldErrors)}`);
   return true;
@@ -80,10 +76,9 @@ async function seedSeeker(i: number) {
   const t = SEEKERS[i % SEEKERS.length]!;
   const u = await ensureUser(`seed-seeker-${i + 1}@example.com`);
   if (!u) return false;
-  const alias = `${ADJ[(i + 3) % ADJ.length]}${NOUN[(i * 7 + 2) % NOUN.length]}${50 + i}`;
   const r = await saveProfile({
     userId: u.id, role: "seeker",
-    values: { alias, memberId: seedSeekerId(i), category: t.category, query: t.query, totalYears: t.years, agree: true },
+    values: { memberId: seedSeekerId(i), category: t.category, query: t.query, totalYears: t.years, agree: true },
   });
   if (!r.ok) throw new Error(`seeker ${i + 1}: ${JSON.stringify(r.fieldErrors)}`);
   return true;

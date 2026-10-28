@@ -30,7 +30,7 @@ test("request, review link, approve, and the seeker sees it approved", async ({ 
   await page.getByRole("button", { name: "Find guides" }).click();
   const first = page.getByRole("listitem").filter({ hasText: "Why this Guide" }).first();
   await expect(first).toBeVisible({ timeout: 60_000 });
-  const alias = (await first.getByRole("heading", { level: 3 }).textContent())!;
+  const guideName = (await first.getByRole("heading", { level: 3 }).textContent())!;
 
   // Contact details in the note are rejected inline.
   await first.getByRole("button", { name: "I want to connect" }).click();
@@ -76,7 +76,7 @@ test("request, review link, approve, and the seeker sees it approved", async ({ 
 
   // The Seeker sees it approved, and the approval e-mail has no number.
   await page.goto("/seeker/connections");
-  await expect(page.getByText(alias)).toBeVisible();
+  await expect(page.getByText(guideName).first()).toBeVisible();
   await expect(page.getByText("Approved", { exact: true })).toBeVisible();
   const mails = await sql<{ text: string }>("select text from dev_outbox where \"to\" = $1 and subject = 'Your request was approved' and created_at > $2", [SEEKER, startedAt]);
   expect(mails.length).toBeGreaterThan(0);
@@ -84,7 +84,7 @@ test("request, review link, approve, and the seeker sees it approved", async ({ 
 
   // Reveal: the number is not in the page until "Show number" is pressed, and the response is never cacheable.
   await page.getByRole("link", { name: "Open" }).click();
-  await expect(page.getByRole("heading", { name: alias, exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: guideName, exact: true })).toBeVisible();
   expect(await page.content()).not.toMatch(/\+9190000000\d\d/);
   const reveal = page.waitForResponse((r) => r.url().includes("/reveal"));
   await page.getByRole("button", { name: "Show number" }).click();
@@ -96,7 +96,7 @@ test("request, review link, approve, and the seeker sees it approved", async ({ 
 
   // Rating: submit, then edit within the window. The Guide never sees this.
   await page.getByRole("link", { name: "Rate this Guide" }).click();
-  await expect(page.getByRole("heading", { name: new RegExp(`How was ${alias}`) })).toBeVisible();
+  await expect(page.getByRole("heading", { name: new RegExp(`How was ${guideName}`) })).toBeVisible();
   await page.getByLabel(/5 stars/).check({ force: true });
   await page.getByLabel(/Review/).fill("Clear, practical advice on switching into product.");
   await page.getByRole("button", { name: "Submit rating" }).click();

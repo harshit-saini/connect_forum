@@ -14,7 +14,7 @@ export default async function AdminRatings({ searchParams }: { searchParams: Pro
       <ul className="space-y-3">
         {rows.map((r) => (
           <li key={r.id} className="rounded-xl border border-border bg-card p-4 text-sm">
-            <p><strong>{r.seekerAlias ?? "(deleted)"}</strong> rated <strong>{r.guideAlias ?? "(deleted)"}</strong> <span aria-label={`${r.score} out of 5`}>{"★".repeat(r.score)}{"☆".repeat(5 - r.score)}</span></p>
+            <p><strong>{r.seekerEmail ?? "(deleted)"}</strong> rated <strong>{r.guideEmail ?? "(deleted)"}</strong> <span aria-label={`${r.score} out of 5`}>{"★".repeat(r.score)}{"☆".repeat(5 - r.score)}</span></p>
             {r.review && <p className="mt-1 whitespace-pre-line">{r.review}</p>}
             <p className="mt-1 text-xs text-muted">{r.createdAt.toISOString().slice(0, 10)}</p>
           </li>
