@@ -3,28 +3,20 @@ import { MATCHING } from "@/config/matching";
 /** The fields of a Seeker the scorer needs (plain data, so it is testable without a database). */
 export type SeekerFacts = {
   category: string;
-  languages: string[];
 };
 
 export type GuideFacts = {
   categories: string[];
-  languages: string[];
   totalYears: number;
   maxNewSeekersPerMonth: number;
 };
 
 export type StructuredParts = {
-  language: number;
   experience: number;
   focus: number;
 };
 
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
-
-export function languageFit(seeker: string[], guide: string[]): number {
-  if (seeker.length === 0) return 0;
-  return clamp01(seeker.filter((l) => guide.includes(l)).length / seeker.length);
-}
 
 export function experienceFit(years: number): number {
   return clamp01(years / MATCHING.experienceFullYears);
@@ -36,7 +28,6 @@ export function focusFit(guideCategoryCount: number): number {
 
 export function structuredScore(s: SeekerFacts, g: GuideFacts): { score: number; parts: StructuredParts } {
   const parts: StructuredParts = {
-    language: languageFit(s.languages, g.languages),
     experience: experienceFit(g.totalYears),
     focus: focusFit(g.categories.length),
   };

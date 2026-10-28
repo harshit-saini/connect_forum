@@ -53,7 +53,6 @@ export default async function ReviewPage({ params }: { params: Promise<{ token: 
           <Block label="Category">{s.category}</Block>
           <Block label="Their question">{s.question}</Block>
           <Block label="Experience">{`${s.years} years`}</Block>
-          <Block label="Languages">{s.languages.join(", ")}</Block>
           <Block label="Note to you">{review.note}</Block>
         </dl>
       </Card>

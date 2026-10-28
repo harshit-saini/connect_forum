@@ -19,6 +19,7 @@ export async function latestCode(email: string): Promise<string> {
 }
 
 /** Test-only: rate limits would otherwise trip when the same test users and IP are used again and again. */
+export const resetLimits = () => resetAuthRateLimits();
 async function resetAuthRateLimits() {
   const client = new pg.Client({ connectionString: process.env.DATABASE_URL ?? "postgres://cf:cf@localhost:5432/connect_forum" });
   await client.connect();

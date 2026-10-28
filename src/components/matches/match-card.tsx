@@ -41,7 +41,6 @@ export function MatchCardView({ match, action, ai = false }: { match: Match; act
       <p className="rounded-lg bg-accent p-3 text-sm"><span className="font-medium">Why this Guide: </span>{match.explanation}{!match.final && <span className="ml-1 text-muted">(refining…)</span>}</p>
 
       <Chips label="Categories" items={guide.categories} />
-      <Chips label="Languages" items={guide.languages} />
 
       <details className="text-sm">
         <summary className="cursor-pointer font-medium text-primary">About this Guide</summary>

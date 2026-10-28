@@ -24,12 +24,6 @@ export const CONTACT_PREFERENCES = options([
   { value: "either", label: "Either" },
 ] as const);
 
-export const LANGUAGES = options(
-  ["English", "Hindi", "Bengali", "Telugu", "Marathi", "Tamil", "Gujarati", "Kannada", "Malayalam", "Punjabi", "Urdu", "Odia", "Assamese"].map(
-    (l) => ({ value: l.toLowerCase(), label: l }),
-  ) as Option[] as readonly Option[],
-);
-
 export function labelOf(list: readonly Option[], value: string): string {
   return list.find((o) => o.value === value)?.label ?? value;
 }

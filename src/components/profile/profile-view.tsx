@@ -1,5 +1,5 @@
 import { Card } from "@/components/ui/card";
-import { CATEGORIES, LANGUAGES, labelOf } from "@/config/taxonomy";
+import { CATEGORIES, labelOf } from "@/config/taxonomy";
 import type { GuideProfileData, Role, SeekerProfileData } from "@/schemas";
 
 function Item({ label, value }: { label: string; value?: React.ReactNode }) {
@@ -11,8 +11,6 @@ function Item({ label, value }: { label: string; value?: React.ReactNode }) {
     </div>
   );
 }
-
-const languageNames = (values: string[]) => values.map((v) => labelOf(LANGUAGES, v)).join(", ");
 
 /** The member's own answers, read-only. The member ID and phone are private and only shown to the member. */
 export function ProfileView({ role, data, memberId, phone }: { role: Role; data: Record<string, unknown>; memberId: string | null; phone: { has: boolean; last4: string | null } }) {
@@ -37,7 +35,6 @@ export function ProfileView({ role, data, memberId, phone }: { role: Role; data:
           </>
         )}
         <Item label="Experience" value={d.totalYears !== undefined ? `${d.totalYears} years` : undefined} />
-        <Item label="Languages" value={d.languages && languageNames(d.languages)} />
       </dl>
     </Card>
   );

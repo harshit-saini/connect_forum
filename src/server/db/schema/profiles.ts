@@ -42,8 +42,9 @@ const common = () => ({
   profileVersion: integer("profile_version").notNull().default(0),
   profileCompletedAt: timestamp("profile_completed_at", { withTimezone: true }),
   // Columns derived from `data` so hard filters and scores run in SQL.
-  languages: text("languages").array().notNull().default(sql`'{}'::text[]`),
   totalYears: integer("total_years"),
+  /** Legacy: languages were asked in an earlier pilot form and are no longer used. */
+  languages: text("languages").array().notNull().default(sql`'{}'::text[]`),
   // Legacy columns from the long pre-pilot wizard. Nothing reads or writes them any more; they are kept
   // (not dropped) so the pilot migration deletes no data. A later migration can drop them.
   country: text("country"),

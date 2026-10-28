@@ -5,13 +5,12 @@ const dedupe = (a: string[]) => [...new Set(a.filter(Boolean))];
 
 /** Columns derived from the answers so hard filters and scores can run in SQL. */
 export function deriveSeeker(d: SeekerProfileData) {
-  return { category: d.category, languages: dedupe(d.languages), totalYears: d.totalYears };
+  return { category: d.category, totalYears: d.totalYears };
 }
 
 export function deriveGuide(d: GuideProfileData) {
   return {
     categories: dedupe(d.categories),
-    languages: dedupe(d.languages),
     totalYears: d.totalYears,
     maxNewSeekersPerMonth: d.maxNewSeekersPerMonth,
   };

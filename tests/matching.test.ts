@@ -26,7 +26,6 @@ describe("hard filters", () => {
     const paused = (await makeGuide()).user;
     const junior = (await makeGuide({ totalYears: 1 })).user;
     const otherCategory = (await makeGuide({ categories: ["upskilling_training", "layoff_unemployment"] })).user;
-    const noLang = (await makeGuide({ languages: ["tamil"] })).user;
     const suspended = (await makeGuide()).user;
     const blockedByGuide = (await makeGuide()).user;
     const reported = (await makeGuide()).user;
@@ -48,7 +47,7 @@ describe("hard filters", () => {
 
     const ids = await candidateIds(seeker.id);
     expect(ids).toContain(ok.id);
-    for (const [name, g] of Object.entries({ paused, junior, otherCategory, noLang, suspended, blockedByGuide, reported, pending, full, legacy })) {
+    for (const [name, g] of Object.entries({ paused, junior, otherCategory, suspended, blockedByGuide, reported, pending, full, legacy })) {
       expect(ids, name).not.toContain(g.id);
     }
   });
@@ -57,15 +56,6 @@ describe("hard filters", () => {
     const seeker = (await makeSeeker({ category: "uncertainty" })).user;
     const multi = (await makeGuide({ categories: ["layoff_unemployment", "uncertainty", "upskilling_training"] })).user;
     expect(await candidateIds(seeker.id)).toContain(multi.id);
-  });
-
-  it("requires a shared language", async () => {
-    const seeker = (await makeSeeker({ languages: ["tamil"] })).user;
-    const english = (await makeGuide({ languages: ["english"] })).user;
-    const tamil = (await makeGuide({ languages: ["tamil", "english"] })).user;
-    const ids = await candidateIds(seeker.id);
-    expect(ids).toContain(tamil.id);
-    expect(ids).not.toContain(english.id);
   });
 
   it("allows a guide again after a past request was declined or expired", async () => {

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireViewer } from "@/server/viewer";
-import { SignOutButton } from "./sign-out-button";
+import { SignOutButton } from "@/components/sign-out-button";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   // Members without a role yet (e.g. an admin who never registered) can still reach /admin and /settings.

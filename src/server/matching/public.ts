@@ -1,4 +1,4 @@
-import { CATEGORIES, LANGUAGES, labelOf } from "@/config/taxonomy";
+import { CATEGORIES, labelOf } from "@/config/taxonomy";
 import type { GuideProfileData, SeekerProfileData } from "@/schemas";
 
 /**
@@ -10,7 +10,6 @@ export type PublicGuide = {
   title: string;
   years: number;
   categories: string[];
-  languages: string[];
   about: string;
 };
 
@@ -19,7 +18,6 @@ export function publicGuide(d: GuideProfileData): PublicGuide {
     title: d.jobTitle,
     years: d.totalYears,
     categories: d.categories.map((c) => labelOf(CATEGORIES, c)),
-    languages: d.languages.map((l) => labelOf(LANGUAGES, l)),
     about: d.about,
   };
 }
@@ -28,7 +26,6 @@ export type PublicSeeker = {
   category: string;
   question: string;
   years: number;
-  languages: string[];
 };
 
 export function publicSeeker(d: SeekerProfileData): PublicSeeker {
@@ -36,6 +33,5 @@ export function publicSeeker(d: SeekerProfileData): PublicSeeker {
     category: labelOf(CATEGORIES, d.category),
     question: d.query,
     years: d.totalYears,
-    languages: d.languages.map((l) => labelOf(LANGUAGES, l)),
   };
 }

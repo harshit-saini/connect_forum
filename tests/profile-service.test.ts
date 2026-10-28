@@ -18,7 +18,6 @@ describe("seeker registration", () => {
     expect(p?.profileCompletedAt).toBeInstanceOf(Date);
     expect(p?.profileVersion).toBe(1);
     expect(p?.category).toBe("career_stagnation");
-    expect(p?.languages).toEqual(["english", "hindi"]);
     expect(p?.memberId).toBe(form.memberId.trim().toUpperCase());
     // The member ID and the consent box are not part of the stored answers.
     expect(p?.data).not.toHaveProperty("memberId");
@@ -33,11 +32,11 @@ describe("seeker registration", () => {
     expect(r).toMatchObject({ ok: false, fieldErrors: { query: "Please remove contact details. Contact details are only shared after approval." } });
   });
 
-  it("requires the category, a question, a language and the consent", async () => {
+  it("requires the category, a question and the consent", async () => {
     const u = await createUser();
-    const r = await saveProfile({ userId: u.id, role: "seeker", values: { ...seekerForm(), category: "astrology", query: "short", languages: [], agree: false } });
+    const r = await saveProfile({ userId: u.id, role: "seeker", values: { ...seekerForm(), category: "astrology", query: "short", agree: false } });
     expect(r).toMatchObject({ ok: false });
-    if (!r.ok) expect(Object.keys(r.fieldErrors).sort()).toEqual(["agree", "category", "languages", "query"]);
+    if (!r.ok) expect(Object.keys(r.fieldErrors).sort()).toEqual(["agree", "category", "query"]);
   });
 
   it("enforces unique aliases case-insensitively, allows keeping your own, and blocks reserved ones", async () => {

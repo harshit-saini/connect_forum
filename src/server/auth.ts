@@ -4,6 +4,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
 import { emailOTP } from "better-auth/plugins";
 import { after } from "next/server";
+import { safeNext } from "@/lib/safe-next";
 import { db } from "@/server/db/client";
 import * as schema from "@/server/db/schema";
 import { sendEmail } from "@/server/email";
@@ -71,11 +72,14 @@ function create() {
         expiresIn: OTP_MINUTES * 60,
         allowedAttempts: 5,
         storeOTP: "hashed",
-        async sendVerificationOTP({ email, otp, type }) {
+        async sendVerificationOTP({ email, otp, type }, ctx) {
           if (type !== "sign-in") return;
           // The link carries the code in the URL fragment: fragments are never sent to servers or logs,
           // and opening the link only pre-fills the form, so email link-scanners cannot consume the code.
-          const link = `${e.APP_URL}/sign-in#email=${encodeURIComponent(email)}&code=${otp}`;
+          // The sign-in form sends where the visitor was going (e.g. /join/guide) so the link in the email
+          // takes them there, not to a generic page, even when it is opened on another device.
+          const next = safeNext(ctx?.headers?.get("x-sign-in-next"));
+          const link = `${e.APP_URL}/sign-in#email=${encodeURIComponent(email)}&code=${otp}${next ? `&next=${encodeURIComponent(next)}` : ""}`;
           runAfter(() =>
             sendEmail({
               to: email,

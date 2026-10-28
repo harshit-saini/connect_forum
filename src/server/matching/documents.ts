@@ -1,12 +1,12 @@
 import "server-only";
-import { CATEGORIES, LANGUAGES, labelOf } from "@/config/taxonomy";
+import { CATEGORIES, labelOf } from "@/config/taxonomy";
 import type { GuideProfileData, SeekerProfileData } from "@/schemas";
 
 /**
  * Bump when the document layout changes. It is stored with every vector so old vectors can be
  * found and re-embedded.
  */
-export const DOC_TEMPLATE_VERSION = 2;
+export const DOC_TEMPLATE_VERSION = 3;
 
 function lines(entries: Array<[string, string | undefined]>): string {
   return entries
@@ -14,8 +14,6 @@ function lines(entries: Array<[string, string | undefined]>): string {
     .map(([k, v]) => `${k}: ${v!.trim()}`)
     .join("\n");
 }
-
-const languages = (values: string[]) => values.map((l) => labelOf(LANGUAGES, l)).join(", ");
 
 /**
  * Deterministic text for a Seeker. Deliberately excludes the alias, member ID and consents. The question
@@ -26,7 +24,6 @@ export function buildNeedsDoc(d: SeekerProfileData): string {
     ["Category", labelOf(CATEGORIES, d.category)],
     ["Question", d.query],
     ["Years of experience", String(d.totalYears)],
-    ["Languages", languages(d.languages)],
   ]);
 }
 
@@ -37,6 +34,5 @@ export function buildOffersDoc(d: GuideProfileData): string {
     ["Role", d.jobTitle],
     ["About", d.about],
     ["Years of experience", String(d.totalYears)],
-    ["Languages", languages(d.languages)],
   ]);
 }
