@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/server/db/client";
-import { matchRuns, matches, users, userRoles } from "@/server/db/schema";
+import { guideProfiles, matchRuns, matches, users, userRoles } from "@/server/db/schema";
 import { createRequest } from "@/server/connections/service";
 import { processJobs } from "@/server/jobs/worker";
 import { saveProfile } from "@/server/profile/service";
@@ -24,7 +25,7 @@ export type SeekerForm = {
 };
 export type GuideForm = {
   memberId: string; categories: string[]; jobTitle: string; totalYears: number; about: string;
-  agree: boolean;
+  shareEmail: boolean; agree: boolean;
 };
 
 export const seekerForm = (over: Partial<SeekerForm> = {}): SeekerForm => ({
@@ -42,6 +43,7 @@ export const guideForm = (over: Partial<GuideForm> = {}): GuideForm => ({
   jobTitle: "Engineering manager",
   totalYears: 12,
   about: "I moved from engineer to manager and have mentored many people who felt stuck in their roles.",
+  shareEmail: true,
   agree: true,
   ...over,
 });
@@ -64,6 +66,19 @@ export async function makeGuide(over: Partial<GuideForm> = {}, opts: { phone?: s
   return { user: u, form };
 }
 
+/**
+ * Makes a Guide's stored profile data look like one saved before shareEmail existed: the key is removed
+ * (not set to false), as it is for real legacy rows.
+ */
+export async function makeLegacy(guideId: string) {
+  await db().update(guideProfiles).set({ data: sql`${guideProfiles.data} - 'shareEmail'` }).where(eq(guideProfiles.userId, guideId));
+}
+
+/** Sets the Guide's stored shareEmail directly, as if they had edited their profile since. */
+export async function setShareEmail(guideId: string, value: boolean) {
+  await db().update(guideProfiles).set({ data: sql`${guideProfiles.data} || ${JSON.stringify({ shareEmail: value })}::jsonb` }).where(eq(guideProfiles.userId, guideId));
+}
+
 /** Runs every due job (profile embeddings from earlier fixtures included), not just one batch. */
 export async function drainJobs() {
   while ((await processJobs({ maxMs: 20_000, maxJobs: 100 })) > 0);
@@ -77,15 +92,16 @@ export async function makeMatch(seekerId: string, guideId: string) {
 }
 
 /** A fresh Seeker and Guide plus their match, not yet connected. */
-export async function makePair(opts: { guide?: Partial<GuideForm>; phone?: string | null } = {}) {
+export async function makePair(opts: { guide?: Partial<GuideForm>; phone?: string | null; legacyGuide?: boolean } = {}) {
   const seeker = await makeSeeker();
   const guide = await makeGuide(opts.guide, { phone: opts.phone });
+  if (opts.legacyGuide) await makeLegacy(guide.user.id); // profile data without shareEmail
   const match = await makeMatch(seeker.user.id, guide.user.id);
   return { seeker, guide, match };
 }
 
 /** A fresh pair where the Seeker has pressed "I want to connect" and the queued e-mails have been sent. */
-export async function connectedPair(opts: { guide?: Partial<GuideForm>; phone?: string | null; note?: string } = {}) {
+export async function connectedPair(opts: { guide?: Partial<GuideForm>; phone?: string | null; note?: string; legacyGuide?: boolean } = {}) {
   const p = await makePair(opts);
   const r = await createRequest({ seekerId: p.seeker.user.id, matchId: p.match.id, note: opts.note });
   if (!r.ok) throw new Error(`connect failed: ${JSON.stringify(r)}`);

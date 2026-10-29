@@ -6,7 +6,7 @@ import { screenText } from "@/lib/screening";
 
 const MAX = 300;
 
-/** "I want to connect": an optional short note, screened for contact details, then the Guide's details are emailed. */
+/** "I want to connect": an optional short note, screened for contact details, then the Guide's details are emailed. The dialog is where the Seeker agrees to share their email address with this Guide. */
 export function ConnectButton({ matchId, name, onDone }: { matchId: string; name: string; onDone: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [note, setNote] = useState("");
@@ -43,8 +43,8 @@ export function ConnectButton({ matchId, name, onDone }: { matchId: string; name
       <dialog ref={dialog} aria-labelledby={`connect-${matchId}`} className="m-auto w-[min(92vw,28rem)] rounded-2xl border border-border bg-card p-6 text-foreground backdrop:bg-black/50">
         <h2 id={`connect-${matchId}`} className="text-xl font-semibold">Connect with {name}</h2>
         <div className="mt-1 space-y-1.5 text-sm text-muted">
-          <p>Connecting shares this Guide&apos;s details with you straight away, by email: their role, experience and how they can help, plus their phone number if they chose to give one.</p>
-          <p>They&apos;re told that someone connected, with your category, question and note (if you add one). They never get your name or contact details.</p>
+          <p>Connecting shares this Guide&apos;s details with you straight away, by email: their role, experience and how they can help, plus their phone number and email address if they chose to share them.</p>
+          <p>They&apos;re told that someone connected, with your category, question and note (if you add one). <strong>They also get your email address, so they can write to you.</strong> They never get your name.</p>
         </div>
         <label htmlFor={`note-${matchId}`} className="mt-4 flex justify-between text-sm font-medium">
           <span>Add a short note <span className="font-normal text-muted">(optional)</span></span>

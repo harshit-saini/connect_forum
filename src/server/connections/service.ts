@@ -55,9 +55,10 @@ export async function createRequest(args: { seekerId: string; matchId: string; n
       await audit(tx, { action: "connection.requested", actorId: seekerId, targetId: m.guideId, subjectType: "connection_request", subjectId: id });
       await audit(tx, { action: "connection.approved", actorId: seekerId, targetId: m.guideId, subjectType: "connection_request", subjectId: id });
       if (unlock) await audit(tx, { action: "unlock.created", actorId: seekerId, targetId: m.guideId, subjectType: "unlock", subjectId: unlock.id });
-      // Ids only: the Guide's number is decrypted when the first e-mail is sent, never stored in a job.
+      // `shares: 2` marks a connection made after the dialog said the Seeker's address is shared (jobs queued by the
+      // older flow lack it and get the address-free e-mail). Ids only: the Guide's number is decrypted when the first e-mail is sent, never stored in a job.
       await queue().enqueue(tx, "send_email", { kind: "guide_details", userId: seekerId, requestId: id }, { idempotencyKey: `guide_details:${id}` });
-      await queue().enqueue(tx, "send_email", { kind: "guide_notified", userId: m.guideId, requestId: id }, { idempotencyKey: `guide_notified:${id}` });
+      await queue().enqueue(tx, "send_email", { kind: "guide_notified", userId: m.guideId, requestId: id, shares: 2 }, { idempotencyKey: `guide_notified:${id}` });
       // "How was your Guide?" goes out RATING_DELAY_DAYS later (any worker run or the daily sweep sends it).
       await queue().enqueue(tx, "rating_reminder", { userId: seekerId, requestId: id }, { runAt: new Date(now.getTime() + env().RATING_DELAY_DAYS * 86_400_000), idempotencyKey: `rating_reminder:${id}` });
       return id;

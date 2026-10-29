@@ -4,7 +4,7 @@ import { db } from "@/server/db/client";
 import { counters, guideProfiles, phoneVault, seekerProfiles, userRoles } from "@/server/db/schema";
 import { loadProfileState, saveProfile } from "@/server/profile/service";
 import { openRow } from "@/server/vault";
-import { createUser, guideForm, nextGuideMemberId, PHONE, seekerForm } from "./fixtures";
+import { createUser, guideForm, makeLegacy, nextGuideMemberId, PHONE, seekerForm } from "./fixtures";
 
 const poolVersion = async () => (await db().select().from(counters).where(eq(counters.name, "guide_pool_version")))[0]?.value ?? 0;
 
@@ -229,6 +229,66 @@ describe("guide registration", () => {
     const [g] = await db().select().from(guideProfiles).where(eq(guideProfiles.userId, u.id));
     expect(g!.profileVersion).toBe(2);
     expect(g!.categories).toEqual(["uncertainty"]);
+  });
+});
+
+describe("a Guide's shareEmail choice", () => {
+  const stored = async (userId: string) => (await db().select().from(guideProfiles).where(eq(guideProfiles.userId, userId)))[0]!;
+
+  it("is stored as given on registration, and is required in the form", async () => {
+    const yes = await createUser();
+    const no = await createUser();
+    await saveProfile({ userId: yes.id, role: "guide", values: guideForm({ shareEmail: true }) });
+    await saveProfile({ userId: no.id, role: "guide", values: guideForm({ shareEmail: false }) });
+    expect((await stored(yes.id)).data).toMatchObject({ shareEmail: true });
+    expect((await stored(no.id)).data).toMatchObject({ shareEmail: false });
+    expect((await loadProfileState(yes.id, "guide")).data).toMatchObject({ shareEmail: true });
+
+    const { shareEmail: _omitted, ...without } = guideForm();
+    void _omitted;
+    const u = await createUser();
+    expect(await saveProfile({ userId: u.id, role: "guide", values: without })).toMatchObject({ ok: false, fieldErrors: { shareEmail: expect.any(String) } });
+    expect(await db().select().from(guideProfiles).where(eq(guideProfiles.userId, u.id))).toHaveLength(0);
+  });
+
+  it("can be changed any time without bumping profile_version or the guide pool (it is not a matching field)", async () => {
+    const u = await createUser();
+    const form = guideForm({ shareEmail: true });
+    await saveProfile({ userId: u.id, role: "guide", values: form, phone: PHONE });
+    const before = await poolVersion();
+    const versionBefore = (await stored(u.id)).profileVersion;
+
+    expect(await saveProfile({ userId: u.id, role: "guide", values: { ...form, shareEmail: false } })).toMatchObject({ ok: true, created: false });
+    expect((await stored(u.id)).data).toMatchObject({ shareEmail: false });
+    expect((await stored(u.id)).profileVersion).toBe(versionBefore);
+    expect(await poolVersion()).toBe(before);
+
+    expect(await saveProfile({ userId: u.id, role: "guide", values: { ...form, shareEmail: true } })).toMatchObject({ ok: true, created: false });
+    expect((await stored(u.id)).data).toMatchObject({ shareEmail: true });
+    expect((await stored(u.id)).profileVersion).toBe(versionBefore);
+    expect(await poolVersion()).toBe(before);
+
+    // A matching edit alongside still bumps, as before.
+    await saveProfile({ userId: u.id, role: "guide", values: { ...form, shareEmail: false, categories: ["uncertainty"] } });
+    expect((await stored(u.id)).profileVersion).toBe(versionBefore + 1);
+    expect(await poolVersion()).toBe(before + 1);
+  });
+
+  it("reads as not shared for a legacy Guide, and ticking it later is not a matching change", async () => {
+    const u = await createUser();
+    const form = guideForm();
+    await saveProfile({ userId: u.id, role: "guide", values: form, phone: PHONE });
+    await makeLegacy(u.id);
+    const before = await poolVersion();
+    const versionBefore = (await stored(u.id)).profileVersion;
+    const state = await loadProfileState(u.id, "guide");
+    expect(state.completed).toBe(true);
+    expect(state.data).not.toHaveProperty("shareEmail"); // the edit form shows this as unticked
+
+    expect(await saveProfile({ userId: u.id, role: "guide", values: { ...form, shareEmail: true } })).toMatchObject({ ok: true, created: false });
+    expect((await stored(u.id)).data).toMatchObject({ shareEmail: true });
+    expect((await stored(u.id)).profileVersion).toBe(versionBefore);
+    expect(await poolVersion()).toBe(before);
   });
 });
 

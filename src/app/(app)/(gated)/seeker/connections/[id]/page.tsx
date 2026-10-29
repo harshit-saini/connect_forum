@@ -48,7 +48,7 @@ export default async function ConnectionPage({ params }: { params: Promise<{ id:
       ) : (
         <Card className="space-y-1">
           <h2 className="text-xl font-semibold">Contact this Guide</h2>
-          <p className="text-sm text-muted">This Guide didn&apos;t give a phone number, so you can&apos;t contact them directly. Their profile details are below and in the email we sent you.</p>
+          <p className="text-sm text-muted">This Guide didn&apos;t give a phone number. If they chose to share their email address, it is in the email we sent you. Their profile details are below and in that email too.</p>
         </Card>
       )}
 

@@ -66,7 +66,7 @@ async function seedGuide(i: number) {
   if (!u) return false;
   const r = await saveProfile({
     userId: u.id, role: "guide", phone: `+9190000000${String(i + 1).padStart(2, "0")}`,
-    values: { memberId: seedGuideId(i), categories: [...t.categories], jobTitle: t.title, totalYears: t.years, about: t.about, agree: true },
+    values: { memberId: seedGuideId(i), categories: [...t.categories], jobTitle: t.title, totalYears: t.years, about: t.about, shareEmail: true, agree: true },
   });
   if (!r.ok) throw new Error(`guide ${i + 1}: ${JSON.stringify(r.fieldErrors)}`);
   return true;

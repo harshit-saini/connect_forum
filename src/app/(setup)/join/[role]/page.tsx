@@ -10,8 +10,8 @@ import { dashboardPath, requireViewer, type Role } from "@/server/viewer";
 export const metadata = { title: "Join" };
 
 const COPY: Record<Role, { title: string; intro: string }> = {
-  seeker: { title: "Ask for guidance", intro: "A few quick details and your question. Guides never see your name or contact details." },
-  guide: { title: "Register as a Guide", intro: "A short profile is all we need. Seekers who connect with you are emailed your role, categories and experience, and your phone number only if you choose to give one." },
+  seeker: { title: "Ask for guidance", intro: "A few quick details and your question. Guides never see your name. Your email address is shared only with a Guide you choose to connect with." },
+  guide: { title: "Register as a Guide", intro: "A short profile is all we need. Seekers who connect with you are emailed your role, categories and experience, plus your email address and phone number if you choose to share them. You decide on the form below." },
 };
 
 /** The link members use to register: /join/seeker (shared on the website) and /join/guide (sent by email). */

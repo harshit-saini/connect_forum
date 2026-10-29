@@ -5,7 +5,7 @@ import { db } from "@/server/db/client";
 import { auditLog, blocks, connectionRequests, devOutbox, guideProfiles, jobs, reports, unlocks, users } from "@/server/db/schema";
 import { closeLegacyPending, createRequest, listSeekerConnections } from "@/server/connections/service";
 import { queue } from "@/server/jobs";
-import { connectedPair, drainJobs, makeGuide, makeMatch, makePair, makeSeeker, PHONE } from "./fixtures";
+import { connectedPair, drainJobs, makeGuide, makeMatch, makePair, makeSeeker, PHONE, setShareEmail } from "./fixtures";
 
 beforeAll(async () => {
   await db().delete(users);
@@ -137,7 +137,7 @@ describe("connecting", () => {
 });
 
 describe("the e-mail to the Seeker", () => {
-  it("has the Guide's public details and their phone number when one is on file", async () => {
+  it("has the Guide's public details, their phone number when one is on file, and their address when they share it", async () => {
     const p = await connectedPair();
     const mail = (await emailsTo(p.seeker.user.email)).find((m) => m.subject === "Your Guide's details")!;
     expect(mail).toBeDefined();
@@ -147,7 +147,8 @@ describe("the e-mail to the Seeker", () => {
     expect(mail.text).toContain(p.guide.form.about);
     expect(mail.text).toContain(PHONE);
     expect(mail.text).toContain(`/seeker/connections/${p.requestId}`);
-    expect(mail.text).not.toContain(p.guide.user.email); // the Guide's address is never shared
+    expect(mail.text).toContain(`Email: ${p.guide.user.email}`); // this Guide ticked "share my email address"
+    expect(mail.text).toMatch(/keep their contact details to yourself/);
   });
 
   it("says plainly that there is no number, and does not include one, when the Guide gave none", async () => {
@@ -156,8 +157,18 @@ describe("the e-mail to the Seeker", () => {
     expect(mail).toBeDefined();
     expect(mail.text).toContain(p.guide.form.jobTitle);
     expect(mail.text).toContain("didn't share a phone number");
+    expect(mail.text).toContain(`Email: ${p.guide.user.email}`); // still reachable by e-mail
+    expect(mail.text).not.toMatch(/can't contact them directly/);
+    expect(mail.text.replace(/https?:\/\/\S+/g, "").replace(p.guide.user.email, "")).not.toMatch(/\+?\d[\d\s-]{8,}\d/);
+  });
+
+  it("says the Guide can't be contacted directly when they gave neither a number nor an address", async () => {
+    const p = await connectedPair({ phone: null, guide: { shareEmail: false } });
+    const mail = (await emailsTo(p.seeker.user.email)).find((m) => m.subject === "Your Guide's details")!;
+    expect(mail.text).toContain("didn't share a phone number or an email address");
     expect(mail.text).toMatch(/can't contact them directly/);
-    expect(mail.text.replace(/https?:\/\/\S+/g, "")).not.toMatch(/\+?\d[\d\s-]{8,}\d/);
+    expect(mail.text).not.toContain(p.guide.user.email);
+    expect(mail.text).not.toMatch(/Email:/);
   });
 
   it("uses the number on file when the e-mail is sent, not when the Seeker connected", async () => {
@@ -169,7 +180,7 @@ describe("the e-mail to the Seeker", () => {
     await drainJobs();
     const mail = (await emailsTo(p.seeker.user.email)).find((m) => m.subject === "Your Guide's details")!;
     expect(mail.text).not.toContain(PHONE);
-    expect(mail.text).toMatch(/can't contact them directly/);
+    expect(mail.text).toContain("didn't share a phone number");
   });
 
   it("never puts a phone number or an e-mail address in a job row", async () => {
@@ -181,7 +192,7 @@ describe("the e-mail to the Seeker", () => {
       expect(rows).toHaveLength(3);
       for (const j of rows) {
         const payload = JSON.stringify(j.payload);
-        expect(Object.keys(j.payload).every((k) => ["kind", "userId", "requestId"].includes(k)), payload).toBe(true);
+        expect(Object.keys(j.payload).every((k) => ["kind", "userId", "requestId", "shares"].includes(k)), payload).toBe(true);
         for (const secret of ["9876543210", "98765", p.guide.user.email, p.seeker.user.email, "@"]) expect(payload).not.toContain(secret);
         expect(`${j.lastError ?? ""}`).not.toContain("9876543210");
       }
@@ -227,7 +238,7 @@ describe("the e-mail to the Seeker", () => {
 });
 
 describe("the e-mail to the Guide", () => {
-  it("has the Seeker's category and question, and no contact details", async () => {
+  it("has the Seeker's category, question and e-mail address, but no member ID or phone number", async () => {
     const p = await connectedPair({ note: "I admire your path." });
     const mail = (await emailsTo(p.guide.user.email)).find((m) => m.subject === "A Seeker has been given your details")!;
     expect(mail).toBeDefined();
@@ -236,7 +247,10 @@ describe("the e-mail to the Guide", () => {
     expect(mail.text).toContain("I admire your path.");
     expect(mail.text).toMatch(/including your phone number/);
     expect(mail.text).not.toMatch(/\/review\//); // no link to act on
-    for (const secret of [p.seeker.user.email, p.seeker.form.memberId, PHONE, "9876543210"]) expect(mail.text).not.toContain(secret);
+    expect(mail.text).toContain(`Reply to the Seeker at: ${p.seeker.user.email}`);
+    expect(mail.text).toMatch(/don't share their email address with anyone else/);
+    expect(mail.text).not.toMatch(/no contact details/i);
+    for (const secret of [p.seeker.form.memberId, PHONE, "9876543210"]) expect(mail.text).not.toContain(secret);
   });
 
   it("says no number was shared when the Guide has none", async () => {
@@ -314,5 +328,183 @@ describe("what is sent, and when", () => {
     await processJobs({ maxMs: 20_000, maxJobs: 100 });
     const left = await db().select().from(jobs).where(and(eq(jobs.type, "send_email"), eq(jobs.status, "failed")));
     expect(left.filter((j) => String((j.payload as { userId?: string }).userId) === p.seeker.user.id)).toHaveLength(0);
+  });
+});
+
+const SEEKER_MAIL = "Your Guide's details";
+const GUIDE_MAIL = "A Seeker has been given your details";
+const mailTo = async (address: string, subject: string) => (await emailsTo(address)).find((m) => m.subject === subject);
+const sharedAudit = (requestId: string) => db().select().from(auditLog).where(and(eq(auditLog.action, "email.shared"), eq(auditLog.subjectId, requestId)));
+
+describe("e-mail addresses in the connection e-mails", () => {
+  it("includes the Guide's address in the Seeker's e-mail, and the Seeker's in the Guide's, when the Guide opted in", async () => {
+    const p = await connectedPair({ guide: { shareEmail: true } });
+    const toSeeker = (await mailTo(p.seeker.user.email, SEEKER_MAIL))!;
+    const toGuide = (await mailTo(p.guide.user.email, GUIDE_MAIL))!;
+    expect(toSeeker.text).toContain(`Email: ${p.guide.user.email}`);
+    expect(toSeeker.text).not.toContain(p.seeker.user.email); // their own address is not echoed back
+    expect(toGuide.text).toContain(`Reply to the Seeker at: ${p.seeker.user.email}`);
+    expect(toGuide.text).toMatch(/If you have chosen to share your email address, Seekers who connect with you receive it/);
+    expect(toGuide.text).not.toContain(p.guide.user.email);
+  });
+
+  it("leaves the Guide's address out when shareEmail is false, but still gives the Guide the Seeker's", async () => {
+    const p = await connectedPair({ guide: { shareEmail: false } });
+    const toSeeker = (await mailTo(p.seeker.user.email, SEEKER_MAIL))!;
+    const toGuide = (await mailTo(p.guide.user.email, GUIDE_MAIL))!;
+    expect(toSeeker.text).toContain(p.guide.form.jobTitle);
+    expect(toSeeker.text).toContain(PHONE); // the phone number is a separate choice
+    expect(toSeeker.text).not.toContain(p.guide.user.email);
+    expect(toSeeker.text).not.toMatch(/Email:/);
+    expect(toGuide.text).toContain(`Reply to the Seeker at: ${p.seeker.user.email}`);
+    expect(toGuide.text).toMatch(/If you have chosen to share your email address, Seekers who connect with you receive it/);
+  });
+
+  it("treats a legacy Guide (profile data without shareEmail) as not sharing, whether or not they have a number", async () => {
+    for (const phone of [PHONE, null]) {
+      const p = await connectedPair({ legacyGuide: true, phone });
+      const [row] = await db().select().from(guideProfiles).where(eq(guideProfiles.userId, p.guide.user.id));
+      expect(row!.data).not.toHaveProperty("shareEmail"); // really legacy: the key is absent, not false
+      const toSeeker = (await mailTo(p.seeker.user.email, SEEKER_MAIL))!;
+      const toGuide = (await mailTo(p.guide.user.email, GUIDE_MAIL))!;
+      expect(toSeeker.text).not.toContain(p.guide.user.email);
+      expect(toSeeker.text).not.toMatch(/Email:/);
+      expect(toGuide.text).toContain(p.seeker.user.email);
+      expect(toGuide.text).toMatch(/If you have chosen to share your email address, Seekers who connect with you receive it/);
+      expect(await sharedAudit(p.requestId).then((r) => r.map((a) => a.metadata))).toEqual([{ direction: "seeker_to_guide" }]);
+    }
+  });
+
+  it("reads shareEmail when the job runs, not when the Seeker connected (untick, or tick, in between)", async () => {
+    const unticked = await makePair({ guide: { shareEmail: true } });
+    const a = await createRequest({ seekerId: unticked.seeker.user.id, matchId: unticked.match.id });
+    const ticked = await makePair({ legacyGuide: true });
+    const b = await createRequest({ seekerId: ticked.seeker.user.id, matchId: ticked.match.id });
+    if (!a.ok || !b.ok) throw new Error("expected ok");
+    await setShareEmail(unticked.guide.user.id, false);
+    await setShareEmail(ticked.guide.user.id, true);
+    await drainJobs();
+
+    expect((await mailTo(unticked.seeker.user.email, SEEKER_MAIL))!.text).not.toContain(unticked.guide.user.email);
+    expect((await mailTo(unticked.guide.user.email, GUIDE_MAIL))!.text).toMatch(/If you have chosen to share your email address/);
+    expect((await sharedAudit(a.requestId)).map((r) => r.metadata)).toEqual([{ direction: "seeker_to_guide" }]);
+
+    expect((await mailTo(ticked.seeker.user.email, SEEKER_MAIL))!.text).toContain(`Email: ${ticked.guide.user.email}`);
+    expect((await mailTo(ticked.guide.user.email, GUIDE_MAIL))!.text).toMatch(/If you have chosen to share your email address/);
+    expect((await sharedAudit(b.requestId)).map((r) => (r.metadata as { direction: string }).direction).sort()).toEqual(["guide_to_seeker", "seeker_to_guide"]);
+  });
+
+  it("uses the address the account has when the e-mail is sent", async () => {
+    const p = await makePair();
+    const r = await createRequest({ seekerId: p.seeker.user.id, matchId: p.match.id });
+    if (!r.ok) throw new Error("expected ok");
+    const newGuide = `changed-${randomUUID()}@example.com`;
+    const newSeeker = `changed-${randomUUID()}@example.com`;
+    await db().update(users).set({ email: newGuide }).where(eq(users.id, p.guide.user.id));
+    await db().update(users).set({ email: newSeeker }).where(eq(users.id, p.seeker.user.id));
+    await drainJobs();
+    expect((await mailTo(newSeeker, SEEKER_MAIL))!.text).toContain(`Email: ${newGuide}`);
+    expect((await mailTo(newGuide, GUIDE_MAIL))!.text).toContain(`Reply to the Seeker at: ${newSeeker}`);
+  });
+
+  it("never puts either address in a job row, an audit row or a log line", async () => {
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const lines = vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.stubEnv("LOG_IN_TESTS", "true"); // the logger is silent under test otherwise
+    try {
+      const p = await makePair({ guide: { shareEmail: true } });
+      const r = await createRequest({ seekerId: p.seeker.user.id, matchId: p.match.id, note: "Hello" });
+      if (!r.ok) throw new Error("expected ok");
+      await drainJobs();
+      const addresses = [p.guide.user.email, p.seeker.user.email];
+
+      // The mails did go out, with the addresses, so the absences below mean something.
+      expect((await mailTo(p.seeker.user.email, SEEKER_MAIL))!.text).toContain(p.guide.user.email);
+      expect((await mailTo(p.guide.user.email, GUIDE_MAIL))!.text).toContain(p.seeker.user.email);
+
+      const jobRows = await db().select().from(jobs).where(or(eq(jobs.idempotencyKey, `guide_details:${r.requestId}`), eq(jobs.idempotencyKey, `guide_notified:${r.requestId}`), eq(jobs.idempotencyKey, `rating_reminder:${r.requestId}`)));
+      expect(jobRows).toHaveLength(3);
+      expect(jobRows.filter((j) => j.type === "send_email").every((j) => j.status === "done")).toBe(true); // the rating reminder waits days
+      const auditRows = await db().select().from(auditLog).where(or(eq(auditLog.subjectId, r.requestId), eq(auditLog.actorId, p.seeker.user.id), eq(auditLog.actorId, p.guide.user.id), eq(auditLog.targetId, p.seeker.user.id), eq(auditLog.targetId, p.guide.user.id)));
+      expect(auditRows.map((a) => a.action)).toEqual(expect.arrayContaining(["phone.emailed", "email.shared"]));
+
+      const logged = [...lines.mock.calls, ...warnings.mock.calls, ...errors.mock.calls].map((c) => c.map(String).join(" ")).join("\n");
+      expect(logged).toContain("email.mock_sent"); // the logger was live while the e-mails went out
+      for (const [what, text] of [["job rows", JSON.stringify(jobRows)], ["audit rows", JSON.stringify(auditRows)], ["logs", logged]] as const) {
+        for (const address of addresses) expect(text, `${what} contain ${address}`).not.toContain(address);
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("writes one 'email.shared' audit row per direction actually sent, with ids and a direction only", async () => {
+    const p = await connectedPair({ guide: { shareEmail: true } });
+    await drainJobs(); // running the queue again changes nothing
+    const rows = await sharedAudit(p.requestId);
+    expect(rows).toHaveLength(2);
+    const toGuide = rows.find((r) => (r.metadata as { direction: string }).direction === "seeker_to_guide")!;
+    const toSeeker = rows.find((r) => (r.metadata as { direction: string }).direction === "guide_to_seeker")!;
+    // Actor: whose address was shared. Target: who it was sent to.
+    expect(toGuide).toMatchObject({ actorId: p.seeker.user.id, targetId: p.guide.user.id, subjectType: "connection_request", metadata: { direction: "seeker_to_guide" } });
+    expect(toSeeker).toMatchObject({ actorId: p.guide.user.id, targetId: p.seeker.user.id, subjectType: "connection_request", metadata: { direction: "guide_to_seeker" } });
+    for (const r of rows) {
+      expect(Object.keys(r.metadata as object)).toEqual(["direction"]); // the redactor would blank keys such as "email"
+      for (const address of [p.guide.user.email, p.seeker.user.email]) expect(JSON.stringify(r)).not.toContain(address);
+    }
+    // The existing audit entry is unchanged: a flag, not an address.
+    const [emailed] = await db().select().from(auditLog).where(and(eq(auditLog.action, "phone.emailed"), eq(auditLog.subjectId, p.requestId)));
+    expect(emailed!.metadata).toEqual({ included: true });
+  });
+
+  it("writes only the seeker_to_guide row when the Guide's address was not sent", async () => {
+    const p = await connectedPair({ guide: { shareEmail: false } });
+    expect((await sharedAudit(p.requestId)).map((r) => r.metadata)).toEqual([{ direction: "seeker_to_guide" }]);
+  });
+
+  it("sends nothing and audits nothing when the Guide or Seeker was suspended or deleted, a report was filed or either side blocked, before the jobs ran", async () => {
+    const cases: Array<[string, (p: Awaited<ReturnType<typeof makePair>>) => Promise<unknown>]> = [
+      ["guide suspended", (p) => db().update(users).set({ suspendedAt: new Date() }).where(eq(users.id, p.guide.user.id))],
+      ["guide deleted", (p) => db().update(users).set({ deletedAt: new Date() }).where(eq(users.id, p.guide.user.id))],
+      ["seeker suspended", (p) => db().update(users).set({ suspendedAt: new Date() }).where(eq(users.id, p.seeker.user.id))],
+      ["seeker deleted", (p) => db().update(users).set({ deletedAt: new Date() }).where(eq(users.id, p.seeker.user.id))],
+      ["blocked by the Guide", (p) => db().insert(blocks).values({ blockerId: p.guide.user.id, blockedId: p.seeker.user.id })],
+      ["blocked by the Seeker", (p) => db().insert(blocks).values({ blockerId: p.seeker.user.id, blockedId: p.guide.user.id })],
+      ["reported by the Seeker", (p) => db().insert(reports).values({ reporterId: p.seeker.user.id, reportedId: p.guide.user.id, reason: "spam" })],
+      ["reported by the Guide", (p) => db().insert(reports).values({ reporterId: p.guide.user.id, reportedId: p.seeker.user.id, reason: "spam" })],
+    ];
+    const made: Array<[string, Awaited<ReturnType<typeof makePair>>, string]> = [];
+    for (const [name, change] of cases) {
+      const p = await makePair({ guide: { shareEmail: true } });
+      const r = await createRequest({ seekerId: p.seeker.user.id, matchId: p.match.id });
+      if (!r.ok) throw new Error("expected ok");
+      await change(p);
+      made.push([name, p, r.requestId]);
+    }
+    await drainJobs();
+    for (const [name, p, requestId] of made) {
+      // A deleted or suspended party gets nothing either; nobody gets the other's address.
+      for (const address of [p.seeker.user.email, p.guide.user.email]) {
+        expect(await emailsTo(address), `${name}: mail to ${address}`).toHaveLength(0);
+      }
+      expect(await sharedAudit(requestId), name).toHaveLength(0);
+    }
+  });
+});
+
+describe("e-mails queued before the address-sharing dialog existed", () => {
+  it("do not carry the Seeker's address, because that Seeker never agreed to share it", async () => {
+    const p = await makePair();
+    const r = await createRequest({ seekerId: p.seeker.user.id, matchId: p.match.id });
+    if (!r.ok) throw new Error("expected ok");
+    // Turn the queued Guide e-mail into the shape the older flow produced: no `shares` marker.
+    await db().update(jobs).set({ payload: { kind: "guide_notified", userId: p.guide.user.id, requestId: r.requestId } }).where(eq(jobs.idempotencyKey, `guide_notified:${r.requestId}`));
+    await drainJobs();
+    const mail = (await emailsTo(p.guide.user.email)).find((m) => m.subject === "A Seeker has been given your details")!;
+    expect(mail).toBeDefined();
+    expect(mail.text).not.toContain(p.seeker.user.email);
+    expect(mail.text).not.toMatch(/Reply to the Seeker at/);
+    expect(await db().select().from(auditLog).where(and(eq(auditLog.action, "email.shared"), eq(auditLog.subjectId, r.requestId)))).not.toContainEqual(expect.objectContaining({ metadata: { direction: "seeker_to_guide" } }));
   });
 });

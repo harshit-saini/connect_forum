@@ -16,9 +16,27 @@ async function sql<T = Record<string, unknown>>(text: string, params: unknown[] 
 }
 
 const SEEKER2 = "seed-seeker-2@example.com";
+const SEEKER3 = "seed-seeker-3@example.com";
+
+/**
+ * The seeded Guides are legacy: their profile data has no shareEmail. A test that depends on the choice sets
+ * it for all of them (null removes the key, as for a legacy row) and puts the original data back afterwards.
+ */
+let restoreGuides: (() => Promise<void>) | undefined;
+async function forceShareEmail(value: boolean | null) {
+  const saved = await sql<{ user_id: string; data: unknown }>("select user_id, data from guide_profiles");
+  await sql(value === null ? "update guide_profiles set data = data - 'shareEmail'" : "update guide_profiles set data = data || jsonb_build_object('shareEmail', $1::boolean)", value === null ? [] : [value]);
+  restoreGuides = async () => {
+    for (const r of saved) await sql("update guide_profiles set data = $2::jsonb where user_id = $1", [r.user_id, JSON.stringify(r.data)]);
+  };
+}
+test.afterEach(async () => {
+  await restoreGuides?.();
+  restoreGuides = undefined;
+});
 
 test.beforeAll(async () => {
-  for (const email of [SEEKER2]) {
+  for (const email of [SEEKER2, SEEKER3]) {
     await sql("delete from ratings where seeker_id = (select id from users where email = $1)", [email]);
     await sql("delete from blocks where blocker_id = (select id from users where email = $1)", [email]);
     await sql("delete from connection_requests where seeker_id = (select id from users where email = $1)", [email]);
@@ -33,6 +51,7 @@ test.beforeAll(async () => {
 
 test("connect: details are emailed straight away, the card says Details sent, and the connection lists as Connected", async ({ page }) => {
   const startedAt = new Date();
+  await forceShareEmail(null); // legacy Guides: no shareEmail, so their address must not be sent
   await signIn(page, SEEKER);
   await openFinder(page);
   await page.getByRole("button", { name: "Find guides" }).click();
@@ -44,6 +63,10 @@ test("connect: details are emailed straight away, the card says Details sent, an
   await first.getByRole("button", { name: "I want to connect" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByText(/emailed|by email/).first()).toBeVisible();
+  // Pressing the confirm button is the Seeker's consent to share their address, so the dialog must say so.
+  await expect(dialog.getByText(/They also get your email address, so they can write to you/)).toBeVisible();
+  await expect(dialog.getByText(/They never get your name/)).toBeVisible();
+  await expect(dialog.getByText(/their phone number and email address if they chose to share them/)).toBeVisible();
   await dialog.getByLabel(/Add a short note/).fill("call me on 98765 43210");
   await expect(dialog.getByText("Please remove contact details. Contact details can't be shared in free text.")).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Email me their details" })).toBeDisabled();
@@ -68,9 +91,10 @@ test("connect: details are emailed straight away, the card says Details sent, an
   expect(seekerMail).toContain(guideName);
   expect(seekerMail).toMatch(/\+9190000000\d\d/);
   expect(seekerMail).not.toContain("/review/");
-  expect(seekerMail).not.toContain("seed-guide-");
+  expect(seekerMail).not.toContain("seed-guide-"); // this Guide never ticked "share my email address"
+  expect(seekerMail).not.toMatch(/Email:/);
 
-  // The Guide gets a short heads-up: the Seeker's category, question and note, and nothing to click or contact.
+  // The Guide gets a short heads-up: the Seeker's category, question and note, and the Seeker's address to reply to.
   let guideMail = "";
   await expect(async () => {
     const rows = await sql<{ text: string }>("select text from dev_outbox where subject = 'A Seeker has been given your details' and created_at > $1 and \"to\" = (select email from users where id = $2) order by created_at desc limit 1", [startedAt, conns[0]!.guide_id]);
@@ -80,7 +104,17 @@ test("connect: details are emailed straight away, the card says Details sent, an
   expect(guideMail).toContain("I would love your view on moving into product.");
   expect(guideMail).toMatch(/Category: /);
   expect(guideMail).not.toContain("/review/");
-  expect(guideMail).not.toContain(SEEKER);
+  expect(guideMail).toContain(`Reply to the Seeker at: ${SEEKER}`);
+  expect(guideMail).toMatch(/If you have chosen to share your email address, Seekers who connect with you receive it/);
+
+  // Only the Seeker's address went to the Guide, and the audit row has ids and a direction, never an address.
+  const shared = await sql<{ metadata: unknown; row: string }>("select metadata, a::text as row from audit_log a where action = 'email.shared' and subject_id = $1", [conns[0]!.id]);
+  expect(shared.map((r) => r.metadata)).toEqual([{ direction: "seeker_to_guide" }]);
+  const jobRows = await sql<{ payload: unknown }>("select payload from jobs where idempotency_key like $1", [`%${conns[0]!.id}`]);
+  for (const text of [JSON.stringify(shared), JSON.stringify(jobRows)]) {
+    expect(text).not.toContain(SEEKER);
+    expect(text).not.toContain("seed-guide-");
+  }
 
   // The old approval e-mails are gone: nobody was asked to review anything.
   expect(await sql("select 1 from dev_outbox where subject like 'A Seeker would like%' and created_at > $1", [startedAt])).toHaveLength(0);
@@ -128,8 +162,9 @@ test("connect: details are emailed straight away, the card says Details sent, an
   await expect(page.getByText("This Guide's number is no longer available.")).toBeVisible();
 });
 
-test("a Guide without a phone number: the e-mail says so plainly and the connection page has no Show number", async ({ page }) => {
+test("a Guide without a phone number or a shared address: the e-mail says so plainly and the connection page has no Show number", async ({ page }) => {
   const startedAt = new Date();
+  await forceShareEmail(null);
   await signIn(page, SEEKER2);
   await openFinder(page);
   await page.getByRole("button", { name: "Find guides" }).click();
@@ -153,8 +188,10 @@ test("a Guide without a phone number: the e-mail says so plainly and the connect
       expect(mail).not.toBe("");
     }).toPass({ timeout: 20_000 });
     expect(mail).toContain(guideName);
+    expect(mail).toContain("didn't share a phone number or an email address");
     expect(mail).toMatch(/can't contact them directly/);
     expect(mail).not.toMatch(/\+9190000000\d\d/);
+    expect(mail).not.toContain("seed-guide-");
 
     await page.goto("/seeker/connections");
     await page.getByRole("link", { name: "Open" }).click();
@@ -168,4 +205,42 @@ test("a Guide without a phone number: the e-mail says so plainly and the connect
     }
     await sql("delete from connection_requests where seeker_id = (select id from users where email = $1)", [SEEKER2]);
   }
+});
+
+test("a Guide who opted in: the Seeker's e-mail has their address, the Guide's has the Seeker's, and nothing private lands in jobs or the audit log", async ({ page }) => {
+  const startedAt = new Date();
+  await forceShareEmail(true);
+  await signIn(page, SEEKER3);
+  await openFinder(page);
+  await page.getByRole("button", { name: "Find guides" }).click();
+  const first = page.getByRole("listitem").filter({ hasText: "Why this Guide" }).first();
+  await expect(first).toBeVisible({ timeout: 60_000 });
+  await first.getByRole("button", { name: "I want to connect" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Email me their details" }).click();
+  await expect(first.getByText("Details sent")).toBeVisible();
+
+  const [conn] = await sql<{ id: string; guide_email: string }>("select c.id, g.email as guide_email from connection_requests c join users g on g.id = c.guide_id where c.seeker_id = (select id from users where email = $1)", [SEEKER3]);
+  expect(conn).toBeDefined();
+  const latest = (to: string, subject: string) => sql<{ text: string }>("select text from dev_outbox where \"to\" = $1 and subject = $2 and created_at > $3 order by created_at desc limit 1", [to, subject, startedAt]);
+  let seekerMail = "";
+  let guideMail = "";
+  await expect(async () => {
+    seekerMail = (await latest(SEEKER3, "Your Guide's details"))[0]?.text ?? "";
+    guideMail = (await latest(conn!.guide_email, "A Seeker has been given your details"))[0]?.text ?? "";
+    expect(seekerMail).not.toBe("");
+    expect(guideMail).not.toBe("");
+  }).toPass({ timeout: 20_000 });
+  expect(seekerMail).toContain(`Email: ${conn!.guide_email}`);
+  expect(guideMail).toContain(`Reply to the Seeker at: ${SEEKER3}`);
+  expect(guideMail).toMatch(/If you have chosen to share your email address, Seekers who connect with you receive it/);
+
+  const shared = await sql<{ metadata: { direction: string }; row: string }>("select metadata, a::text as row from audit_log a where action = 'email.shared' and subject_id = $1", [conn!.id]);
+  expect(shared.map((r) => r.metadata)).toHaveLength(2);
+  expect(shared.map((r) => r.metadata.direction).sort()).toEqual(["guide_to_seeker", "seeker_to_guide"]);
+  const jobRows = await sql("select payload, last_error from jobs where idempotency_key like $1", [`%${conn!.id}`]);
+  for (const text of [JSON.stringify(shared), JSON.stringify(jobRows)]) {
+    expect(text).not.toContain(SEEKER3);
+    expect(text).not.toContain(conn!.guide_email);
+  }
+  await sql("delete from connection_requests where seeker_id = (select id from users where email = $1)", [SEEKER3]);
 });
