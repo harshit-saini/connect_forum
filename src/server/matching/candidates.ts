@@ -13,7 +13,7 @@ export type SeekerContext = {
   data: SeekerProfileData;
   facts: SeekerFacts;
   /** Hard-filter inputs (private; never leave the server or reach the AI). */
-  filters: { category: string; minGuideYears: number };
+  filters: { category: string; minGuideYears: number; anyCategory: boolean };
   embedding: number[] | null;
 };
 
@@ -41,7 +41,7 @@ export async function loadSeekerContext(userId: string, useVectors: boolean): Pr
     profileVersion: p.profileVersion,
     data,
     facts: { category: data.category },
-    filters: { category: data.category, minGuideYears: env().MIN_GUIDE_EXPERIENCE_YEARS },
+    filters: { category: data.category, minGuideYears: env().MIN_GUIDE_EXPERIENCE_YEARS, anyCategory: env().MATCH_FALLBACK_ANY_CATEGORY },
     embedding,
   };
 }
@@ -56,7 +56,7 @@ type Row = {
 
 /**
  * Hard filters (HF), all in SQL: verified and active account, registered profile (member ID on file), not
- * paused, experience threshold, the Guide covers the Seeker's category, a shared
+ * paused, experience threshold, the Guide covers the Seeker's category (unless MATCH_FALLBACK_ANY_CATEGORY),
  * no block or report between the pair, and no pending or approved connection for the pair.
  * With vectors, results are ordered by cosine similarity to the Seeker's needs vector.
  */
@@ -77,7 +77,7 @@ export async function findCandidates(s: SeekerContext): Promise<Candidate[]> {
       and g.user_id <> ${s.userId}
       and g.matching_paused = false
       and g.total_years >= ${f.minGuideYears}
-      and ${f.category} = any(g.categories)
+      and (${f.anyCategory}::boolean or ${f.category} = any(g.categories))
       and not exists (select 1 from blocks b where (b.blocker_id = ${s.userId} and b.blocked_id = g.user_id) or (b.blocker_id = g.user_id and b.blocked_id = ${s.userId}))
       and not exists (select 1 from reports r where (r.reporter_id = ${s.userId} and r.reported_id = g.user_id) or (r.reporter_id = g.user_id and r.reported_id = ${s.userId}))
       and not exists (select 1 from connection_requests cr where cr.seeker_id = ${s.userId} and cr.guide_id = g.user_id and cr.status in ('pending', 'approved'))

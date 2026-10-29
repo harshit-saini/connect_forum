@@ -11,6 +11,7 @@ export type GuideFacts = {
 };
 
 export type StructuredParts = {
+  category: number;
   experience: number;
   focus: number;
 };
@@ -27,6 +28,7 @@ export function focusFit(guideCategoryCount: number): number {
 
 export function structuredScore(s: SeekerFacts, g: GuideFacts): { score: number; parts: StructuredParts } {
   const parts: StructuredParts = {
+    category: g.categories.includes(s.category) ? 1 : 0,
     experience: experienceFit(g.totalYears),
     focus: focusFit(g.categories.length),
   };

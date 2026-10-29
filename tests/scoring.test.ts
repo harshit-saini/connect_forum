@@ -31,7 +31,15 @@ describe("structuredScore", () => {
     expect(structuredScore(seeker, { ...guide, totalYears: 8 }).score).toBeLessThan(good);
   });
   it("exposes its parts for the score breakdown", () => {
-    expect(structuredScore(seeker, guide).parts).toEqual({ experience: 1, focus: 1 });
+    expect(structuredScore(seeker, guide).parts).toEqual({ category: 1, experience: 1, focus: 1 });
+  });
+});
+
+describe("category fit", () => {
+  it("ranks a Guide who covers the Seeker's category above a more experienced one who does not", () => {
+    const own = structuredScore(seeker, { ...guide, categories: ["career_stagnation"], totalYears: 3 }).score;
+    const other = structuredScore(seeker, { ...guide, categories: ["uncertainty"], totalYears: 30 }).score;
+    expect(own).toBeGreaterThan(other);
   });
 });
 
