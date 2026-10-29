@@ -10,6 +10,7 @@ export type AuditAction =
   | "phone.revealed"
   | "phone.reveal_denied"
   | "phone.emailed"
+  | "email.shared"
   | "user.suspended"
   | "user.unsuspended"
   | "user.deleted"

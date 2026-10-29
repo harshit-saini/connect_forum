@@ -16,7 +16,7 @@ export function deriveGuide(d: GuideProfileData) {
 }
 
 /** Answers that never affect matching: changing only these leaves profile_version alone. */
-const NON_MATCHING = ["consentedAt"];
+const NON_MATCHING = ["consentedAt", "shareEmail"];
 
 function stable(value: unknown): string {
   return JSON.stringify(value, (_k, v) =>

@@ -50,6 +50,18 @@ describe("data export", () => {
     expect(JSON.stringify(seekerExport)).not.toContain(p.guide.user.email);
   });
 
+  it("does not export the other party's address, whether or not the Guide shares theirs (counterparts are display names only)", async () => {
+    for (const shareEmail of [true, false]) {
+      const p = await connect({ guide: { shareEmail }, note: "Hello there" });
+      const guideJson = JSON.stringify(await buildExport(p.guide.user.id));
+      const seekerJson = JSON.stringify(await buildExport(p.seeker.user.id));
+      expect(guideJson).not.toContain(p.seeker.user.email);
+      expect(seekerJson).not.toContain(p.guide.user.email);
+      // The Guide's own export shows their own choice, which is theirs to see.
+      expect(JSON.parse(guideJson).profile.answers).toMatchObject({ shareEmail });
+    }
+  });
+
   it("the route is a POST that returns an attachment, requires sign-in, is audited and rate-limited", async () => {
     const p = await connectedPair();
     const { POST } = await import("@/app/api/account/export/route");

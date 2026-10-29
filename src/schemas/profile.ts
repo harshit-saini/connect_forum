@@ -34,6 +34,8 @@ export const guideFormSchema = z.object({
   }),
   totalYears: years,
   about: freeText(30, 500),
+  /** Include the Guide's email address in the e-mail to Seekers who connect. Their choice; not a matching field. */
+  shareEmail: z.boolean(),
   agree,
 });
 

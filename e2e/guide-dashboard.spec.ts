@@ -25,6 +25,7 @@ test("a guide sees an aggregate-only rating card and can pause matching", async 
   await expect(toggle).not.toBeChecked();
   await toggle.check();
   await expect(page.getByText("Matching is paused")).toBeVisible();
+  await expect(toggle).toBeEnabled(); // the label flips optimistically; the switch is disabled until the save has finished
   await page.reload();
   await expect(page.getByRole("switch", { name: "Pause matching" })).toBeChecked();
   await page.getByRole("switch", { name: "Pause matching" }).uncheck();

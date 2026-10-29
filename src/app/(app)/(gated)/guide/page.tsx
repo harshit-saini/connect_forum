@@ -17,11 +17,13 @@ export default async function GuideDashboard() {
   const viewer = await requireCompletedProfile();
   if (viewer.role !== "guide") redirect("/dashboard");
 
-  const [profile] = await db().select({ paused: guideProfiles.matchingPaused }).from(guideProfiles).where(eq(guideProfiles.userId, viewer.id));
+  const [profile] = await db().select({ paused: guideProfiles.matchingPaused, data: guideProfiles.data }).from(guideProfiles).where(eq(guideProfiles.userId, viewer.id));
   const monthStart = startOfMonthUtc();
   const [{ n: approved }] = await db().select({ n: count() }).from(connectionRequests).where(and(eq(connectionRequests.guideId, viewer.id), eq(connectionRequests.status, "approved"), gte(connectionRequests.approvedAt, monthStart)));
   const rating = await guideRatingSummary(viewer.id);
   const phone = await phoneStatus(db(), viewer.id);
+  // Older profiles have no shareEmail: they read as not sharing until the Guide ticks it.
+  const sharesEmail = (profile?.data as { shareEmail?: boolean } | undefined)?.shareEmail === true;
 
   return (
     <div className="space-y-8">
@@ -53,11 +55,17 @@ export default async function GuideDashboard() {
 
       <Card className="space-y-1 text-sm">
         <h2 className="font-semibold">What happens when a Seeker connects</h2>
-        <p className="text-muted">There is nothing to approve. When a Seeker presses “I want to connect”, they are emailed your public details: your role, years of experience, categories and how you can help. You get a short email saying someone connected, with their category and question. Seekers never share a name or contact details.</p>
+        <p className="text-muted">There is nothing to approve. When a Seeker presses “I want to connect”, they are emailed your public details: your role, years of experience, categories and how you can help. You get a short email saying someone connected, with their category and question, and <strong>their email address</strong> so you can write to them. Seekers never share a name. Please don&apos;t pass their address on.</p>
+        <p className="text-muted">
+          {sharesEmail
+            ? "Your email address is included in the email each Seeker gets, so they can write to you. "
+            : "You haven't chosen to share your email address, so Seekers don't get it. "}
+          You can change this any time when you <Link href="/profile/edit" className="underline">edit your profile</Link>; it applies to emails sent from then on.
+        </p>
         <p className="text-muted">
           {phone.has
             ? `Your phone number (ending ${phone.last4}) is emailed to every Seeker who connects with you. `
-            : "You haven't added a phone number, so Seekers get only your profile details and can't contact you directly. "}
+            : "You haven't added a phone number. "}
           To add, change or remove a number, <Link href="/profile/edit" className="underline">edit your profile</Link>. Removing it takes effect for future connections; emails already sent can&apos;t be recalled.
         </p>
       </Card>

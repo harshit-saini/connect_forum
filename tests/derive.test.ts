@@ -8,6 +8,14 @@ describe("isMatchingChange", () => {
     expect(isMatchingChange(base, { ...base, consentedAt: "2026-02-02T00:00:00.000Z" })).toBe(false);
   });
 
+  it("ignores shareEmail: ticking, unticking, or adding it to a legacy profile is not a matching change", () => {
+    const guide = { categories: ["uncertainty"], jobTitle: "Manager", totalYears: 10, about: "I help people choose their next step." };
+    expect(isMatchingChange({ ...guide, shareEmail: true }, { ...guide, shareEmail: false })).toBe(false);
+    expect(isMatchingChange(guide, { ...guide, shareEmail: true })).toBe(false); // legacy profile without the key
+    expect(isMatchingChange({ ...guide, shareEmail: false }, guide)).toBe(false);
+    expect(isMatchingChange({ ...guide, shareEmail: true }, { ...guide, shareEmail: false, totalYears: 11 })).toBe(true);
+  });
+
   it("ignores a leftover alias key from older stored data, in either direction", () => {
     expect(isMatchingChange({ ...base, alias: "Curious Falcon" }, base)).toBe(false);
     expect(isMatchingChange(base, { ...base, alias: "Curious Falcon" })).toBe(false);

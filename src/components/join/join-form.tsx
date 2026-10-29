@@ -34,8 +34,10 @@ export function JoinForm({
   const editing = memberId !== null;
   const form = useForm<FieldValues>({
     defaultValues: {
-      ...(role === "guide" ? { categories: [] } : {}),
+      // New Guides start with sharing on; on edit the stored choice shows, and older profiles (no value) read as off.
+      ...(role === "guide" ? { categories: [], shareEmail: true } : {}),
       ...initial,
+      ...(role === "guide" && editing ? { shareEmail: initial.shareEmail === true } : {}),
       memberId: memberId ?? "",
       agree: editing,
     },
@@ -111,10 +113,19 @@ export function JoinForm({
           <PhoneField last4={phone.last4} value={phoneValue} onChange={setPhoneValue} error={phoneError} defaultCountry={DEFAULT_COUNTRY} removed={removePhone} onRemovedChange={setRemovePhone} onIncompleteChange={setPhoneIncomplete} />
         )}
 
+        {role === "guide" && (
+          <CheckboxField name="shareEmail" label="" hint="Seekers who connect with you get your email address in the email we send them, so they can write to you. Untick it any time in your profile.">
+            Share my email address with Seekers who connect with me
+          </CheckboxField>
+        )}
+
         {!editing && (
           <CheckboxField name="agree" label="">
             I agree to the <Link href="/terms" target="_blank" className="underline">Terms</Link> and{" "}
             <Link href="/privacy" target="_blank" className="underline">Privacy policy</Link>, and to my question and profile text being {aiProcessing ? "processed by AI" : "processed automatically"} for matching.
+            {role === "seeker"
+              ? " I understand that when I connect with a Guide, they get my email address."
+              : " I understand that my email address (if ticked above) and any phone number I give are shared with Seekers who connect with me."}
           </CheckboxField>
         )}
 

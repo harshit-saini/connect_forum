@@ -7,6 +7,7 @@ Ideas that are outside the brief. Nothing here is implemented.
 - **A Guide "connections" list** on the Guide dashboard (anonymous: category and date only), so a Guide can see who was given their details without digging through email.
 - **Email digests** for Guides who get several connections in a day, instead of one heads-up each.
 - **Opt-in approval for Guides** who want to vet Seekers first (the pre-pilot flow), as a per-Guide setting rather than the default.
+- **Per-connection email sharing for Guides**: `shareEmail` is one switch for every Seeker. A Guide who wants to share their address only with some Seekers (or after a first reply) would need a per-connection choice.
 - **Per-Seeker share of a Guide's number**: let a Guide choose to share the number only on request, if "emailed to every Seeker who connects" proves too open.
 - **Multi-language UI** (the taxonomy already uses stable values with separate labels).
 - **A matching quality dashboard** for admins (acceptance rate by score band) to tune `src/config/matching.ts`.

@@ -51,7 +51,7 @@ describe("normalizeCompany", () => {
 
 describe("schemas apply screening", () => {
   const seeker = { memberId: "seek-1001", category: "uncertainty", query: "I am not sure what to do next in my career.", totalYears: 4, agree: true };
-  const guide = { memberId: "guide-1001", categories: ["uncertainty"], jobTitle: "Manager", totalYears: 10, about: "I have helped many people choose their next step.", agree: true };
+  const guide = { memberId: "guide-1001", categories: ["uncertainty"], jobTitle: "Manager", totalYears: 10, about: "I have helped many people choose their next step.", shareEmail: true, agree: true };
 
   it("accepts a complete seeker form and normalises the member ID", () => {
     const r = seekerFormSchema.safeParse(seeker);
@@ -78,6 +78,13 @@ describe("schemas apply screening", () => {
     expect(withTitle("My name is Rahul Sharma").success).toBe(false);
     expect(withTitle("Mr. Rahul Sharma").success).toBe(false);
     for (const t of ["Connect Support", "Admin", "Official helper"]) expect(withTitle(t).success, t).toBe(false);
+  });
+  it("requires shareEmail to be a real yes or no, and accepts either", () => {
+    expect(guideFormSchema.safeParse({ ...guide, shareEmail: false }).success).toBe(true);
+    const { shareEmail: _omitted, ...without } = guide;
+    void _omitted;
+    expect(guideFormSchema.safeParse(without).success).toBe(false);
+    expect(guideFormSchema.safeParse({ ...guide, shareEmail: "yes" }).success).toBe(false);
   });
   it("rejects a malformed member ID", () => {
     expect(seekerFormSchema.safeParse({ ...seeker, memberId: "!!" }).success).toBe(false);

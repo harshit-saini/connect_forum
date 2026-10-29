@@ -19,11 +19,12 @@ type Payload = { kind: string; userId: string; [k: string]: unknown };
 /**
  * An approved connection and its Guide, for the connection e-mails. `reachable` is false when the Guide
  * is suspended or deleted or either side has blocked the other since the connection was made: then
- * nothing about the Guide is sent.
+ * nothing about the Guide is sent. `guideEmail` is for an e-mail body only, and only when the Guide's
+ * shareEmail is true; it must never reach a job payload, audit metadata or a log.
  */
 async function loadConnection(requestId: string) {
   const [r] = await db()
-    .select({ id: connectionRequests.id, status: connectionRequests.status, seekerId: connectionRequests.seekerId, guideId: connectionRequests.guideId, note: connectionRequests.note, guideData: guideProfiles.data, suspendedAt: users.suspendedAt, deletedAt: users.deletedAt, gDeleted: guideProfiles.deletedAt })
+    .select({ id: connectionRequests.id, status: connectionRequests.status, seekerId: connectionRequests.seekerId, guideId: connectionRequests.guideId, note: connectionRequests.note, guideData: guideProfiles.data, guideEmail: users.email, suspendedAt: users.suspendedAt, deletedAt: users.deletedAt, gDeleted: guideProfiles.deletedAt })
     .from(connectionRequests)
     .innerJoin(guideProfiles, eq(guideProfiles.userId, connectionRequests.guideId))
     .innerJoin(users, eq(users.id, connectionRequests.guideId))
@@ -42,7 +43,7 @@ async function loadConnection(requestId: string) {
     .where(or(and(eq(reports.reporterId, r.seekerId), eq(reports.reportedId, r.guideId)), and(eq(reports.reporterId, r.guideId), eq(reports.reportedId, r.seekerId))))
     .limit(1);
   const reachable = !r.suspendedAt && !r.deletedAt && !r.gDeleted && !block && !report;
-  return { id: r.id, seekerId: r.seekerId, guideId: r.guideId, note: r.note, guideData: r.guideData as unknown as GuideProfileData, reachable };
+  return { id: r.id, seekerId: r.seekerId, guideId: r.guideId, note: r.note, guideData: r.guideData as unknown as GuideProfileData, guideEmail: r.guideEmail, reachable };
 }
 
 /**
@@ -71,31 +72,37 @@ export async function sendEmailJob(payload: Payload): Promise<void> {
       return;
     }
     case "guide_details": {
-      // To the Seeker: the Guide's public details and, only if they gave one, their number.
+      // To the Seeker: the Guide's public details and, only if they gave one, their number. The Guide's e-mail
+      // address is included only if they opted in (shareEmail) in their profile as it stands right now.
       const c = await loadConnection(String(payload.requestId));
       if (!c || c.seekerId !== user.id || !c.reachable) return;
       const pub = publicGuide(c.guideData);
       // Decrypted here, at send time. It goes into the e-mail only; the job row holds ids.
       const phone = await decryptPhoneForReveal(db(), c.guideId);
+      // Legacy profiles have no shareEmail: only an explicit true counts.
+      const guideEmail = c.guideData.shareEmail === true ? c.guideEmail : null;
       await sendEmail({
         to: user.email,
         subject: "Your Guide's details",
         kind: "guide-details",
-        react: GuideDetailsEmail({ title: pub.title, years: pub.years, categories: pub.categories, about: pub.about, phone, link: `${env().APP_URL}/seeker/connections/${c.id}` }),
+        react: GuideDetailsEmail({ title: pub.title, years: pub.years, categories: pub.categories, about: pub.about, phone, guideEmail, link: `${env().APP_URL}/seeker/connections/${c.id}` }),
         // A retry after a lost response must not send the number twice.
         idempotencyKey: `guide_details:${c.id}`,
       });
       // Ids and whether a number was included; never the number or the address.
       await audit(db(), { action: "phone.emailed", actorId: c.seekerId, targetId: c.guideId, subjectType: "connection_request", subjectId: c.id, metadata: { included: phone !== null } });
+      // Actor is the person whose address was shared, target the person it was sent to. Ids and direction only.
+      if (guideEmail) await audit(db(), { action: "email.shared", actorId: c.guideId, targetId: c.seekerId, subjectType: "connection_request", subjectId: c.id, metadata: { direction: "guide_to_seeker" } });
       return;
     }
     case "guide_notified": {
-      // To the Guide: a Seeker has their details. Seekers have no contact details to share.
+      // To the Guide: a Seeker has their details, and here is the Seeker's e-mail address (they agreed to
+      // share it in the connect dialog). No name or phone: Seekers have neither on file.
       const c = await loadConnection(String(payload.requestId));
       if (!c || c.guideId !== user.id || !c.reachable) return;
       const [seeker] = await db().select().from(seekerProfiles).where(eq(seekerProfiles.userId, c.seekerId)).limit(1);
       if (!seeker) return;
-      const [seekerUser] = await db().select({ suspendedAt: users.suspendedAt, deletedAt: users.deletedAt }).from(users).where(eq(users.id, c.seekerId)).limit(1);
+      const [seekerUser] = await db().select({ email: users.email, suspendedAt: users.suspendedAt, deletedAt: users.deletedAt }).from(users).where(eq(users.id, c.seekerId)).limit(1);
       if (!seekerUser || seekerUser.suspendedAt || seekerUser.deletedAt) return;
       const pub = publicSeeker(seeker.data as unknown as SeekerProfileData);
       const { has } = await phoneStatus(db(), c.guideId);
@@ -103,9 +110,10 @@ export async function sendEmailJob(payload: Payload): Promise<void> {
         to: user.email,
         subject: "A Seeker has been given your details",
         kind: "guide-notified",
-        react: GuideNotifiedEmail({ category: pub.category, question: pub.question, note: c.note, hasPhone: has }),
+        react: GuideNotifiedEmail({ category: pub.category, question: pub.question, note: c.note, hasPhone: has, seekerEmail: payload.shares === 2 ? seekerUser.email : null }),
         idempotencyKey: `guide_notified:${c.id}`,
       });
+      if (payload.shares === 2) await audit(db(), { action: "email.shared", actorId: c.seekerId, targetId: c.guideId, subjectType: "connection_request", subjectId: c.id, metadata: { direction: "seeker_to_guide" } });
       return;
     }
     case "rating_reminder": {
